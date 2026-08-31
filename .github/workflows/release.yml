@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write  # OIDC for PyPI trusted publishing (no API token needed)
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build sdist + wheel
+        run: |
+          pip install -q build
+          python -m build
+      - name: Smoke-test the wheel before publishing
+        run: |
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install -q dist/*.whl
+          /tmp/wheel-check/bin/wikiskill --help >/dev/null && echo "WHEEL SMOKE OK"
+      - name: Publish release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
+      - name: Publish to PyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # no `password` — the action exchanges the OIDC id-token for a
+        # short-lived PyPI token. Requires the publisher registered on PyPI:
+        # owner ashutoshsinghpr7 / repo wikiskill / workflow release.yml
