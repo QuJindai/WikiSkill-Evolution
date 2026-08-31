@@ -1,0 +1,50 @@
+name: Import WikiSkill upstream baseline
+
+on:
+  push:
+    paths:
+      - '.github/workflows/import-upstream.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone pinned upstream
+        run: |
+          set -euxo pipefail
+          git clone https://github.com/ashutoshsinghpr7/wikiskill.git /tmp/wikiskill-upstream
+          git -C /tmp/wikiskill-upstream checkout d4072d2e5e2949b0c1346c4158f7e49785d787de
+          test "$(git -C /tmp/wikiskill-upstream rev-parse HEAD)" = "d4072d2e5e2949b0c1346c4158f7e49785d787de"
+
+      - name: Replace target tree with exact upstream tree
+        run: |
+          set -euxo pipefail
+          rsync -a --delete --exclude='.git/' /tmp/wikiskill-upstream/ ./
+          git status --short
+
+      - name: Commit and push pinned baseline
+        run: |
+          set -euxo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore: import WikiSkill v0.1.2 baseline d4072d2'
+          git push origin HEAD:main
+
+      - name: Verify imported tree equals upstream tree
+        run: |
+          set -euxo pipefail
+          TARGET_TREE="$(git rev-parse HEAD^{tree})"
+          UPSTREAM_TREE="$(git -C /tmp/wikiskill-upstream rev-parse HEAD^{tree})"
+          echo "target_tree=$TARGET_TREE"
+          echo "upstream_tree=$UPSTREAM_TREE"
+          test "$TARGET_TREE" = "$UPSTREAM_TREE"
