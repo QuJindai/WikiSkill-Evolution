@@ -1,16 +1,16 @@
 name: Import WikiSkill upstream baseline
 
 on:
-  push:
-    paths:
-      - '.github/workflows/import-upstream.yml'
   workflow_dispatch:
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
 
 jobs:
   import:
+    if: github.event_name == 'workflow_dispatch' || github.event.issue.title == '[repo-factory] import WikiSkill baseline'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout target repository
