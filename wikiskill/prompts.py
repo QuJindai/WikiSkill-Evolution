@@ -131,22 +131,44 @@ concise and actionable. If no change is warranted, write {{"action": "no_action"
 
 
 def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
-                       accepted: bool, diff: str, baseline_r: float | None) -> str:
+                       accepted: bool, diff: str, baseline_r: float | None,
+                       status: str | None = None, error: str | None = None) -> str:
     prop_path = os.path.join(ws, "runs", "proposals", f"iter-{it:02d}.json")
-    head = (f"### iter-{it:02d} — {'ACCEPTED' if accepted else 'REJECTED'} "
-            f"(R_val={r_val}, R_best={'—' if baseline_r is None else baseline_r})")
-    if proposal.get("action") == "no_action":
+    target = proposal.get("target", "skill") if isinstance(proposal, dict) else "?"
+    action = proposal.get("action", "?") if isinstance(proposal, dict) else "?"
+    effective = status or ("accepted" if accepted else "rejected")
+    label = {
+        "accepted": "ACCEPTED",
+        "rejected": "REJECTED",
+        "invalid": "INVALID",
+        "no_action": "NO_ACTION",
+    }.get(effective, effective.upper())
+    head = (f"### iter-{it:02d} — {label} "
+            f"(target={target}, R_val={r_val}, "
+            f"R_best={'—' if baseline_r is None else baseline_r})")
+    if effective == "no_action" or action == "no_action":
         return f"{head}\n\nProposal: no_action (no validation run performed).\n"
-    name = proposal.get("name", "?")
-    action = proposal.get("action", "?")
-    body = [head, "", f"Proposal: {action} `{name}`",
-            f"Proposal file: `{prop_path}` (re-run collisions possible — full content embedded below)"]
+
+    name = proposal.get("name", "?") if isinstance(proposal, dict) else "?"
+    body = [
+        head, "",
+        f"Target: `{target}`",
+        f"Proposal: {action} `{name}`",
+        f"Proposal file: `{prop_path}` (full content embedded below)",
+    ]
+    if error:
+        body += ["", f"Validation error: {error}"]
     if diff.strip():
         body += ["", "```diff", diff.strip(), "```"]
-    body += ["", "Full proposal content (paper: rejected proposals must remain visible to future proposers):",
-             "", "```json", json.dumps(proposal, indent=2), "```"]
-    if accepted:
-        body += ["", f"Validation: {r_val} > R_best → accepted, skills committed."]
+    body += [
+        "",
+        "Full proposal content (rejected/invalid proposals remain visible to future proposers):",
+        "", "```json", json.dumps(proposal, indent=2), "```",
+    ]
+    if effective == "invalid":
+        body += ["", "Validation: structural validation failed; no held-out rollout performed."]
+    elif accepted:
+        body += ["", f"Validation: {r_val} > R_best → accepted; candidate asset committed."]
     else:
-        body += ["", f"Validation: {r_val} ≤ R_best → skills rolled back; wiki retained."]
+        body += ["", f"Validation: {r_val} ≤ R_best → candidate asset rolled back; wiki retained."]
     return "\n".join(body)
