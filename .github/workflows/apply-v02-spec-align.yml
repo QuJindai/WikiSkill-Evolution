@@ -1,0 +1,42 @@
+name: Apply V0.2 spec alignment
+
+on:
+  push:
+    branches: [feature/v0.2-asset-drivers]
+    paths: ['.github/workflows/apply-v02-spec-align.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v0.2-asset-drivers
+          fetch-depth: 0
+      - name: Align spec with implemented contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('docs/superpowers/specs/2026-09-01-v0.2-asset-driver-design.md')
+          text = p.read_text()
+          text = text.replace('  "changes": {', '  "updates": {', 1)
+          old1 = 'For backward compatibility, the current `evolve(..., max_turns=15)` value remains the fallback inference turn limit when no accepted harness policy exists.'
+          new1 = 'Inference turn resolution is: explicit `max_turns` override (including CLI `--max-turns`) > accepted harness policy `inference_max_turns` > the V0.1 default of 15.'
+          old2 = 'If an accepted harness policy contains `inference_max_turns`, that value takes precedence for subsequent train and validation inference runs. This is required for a Harness candidate to have a measurable behavioral effect during its own validation gate and after acceptance.'
+          new2 = 'When no explicit override is supplied, an applied harness candidate containing `inference_max_turns` affects its own validation gate and, after acceptance, subsequent runs. An explicit operator override intentionally masks that policy value for the current run.'
+          if old1 not in text or old2 not in text:
+              raise SystemExit('expected precedence text not found')
+          text = text.replace(old1, new1, 1).replace(old2, new2, 1)
+          p.write_text(text)
+          PY
+      - name: Commit alignment
+        run: |
+          git config user.email wikiskill@local
+          git config user.name wikiskill-evolution
+          git add docs/superpowers/specs/2026-09-01-v0.2-asset-driver-design.md
+          git rm .github/workflows/apply-v02-spec-align.yml
+          git commit -m 'docs: align v0.2 spec with implemented contract'
+          git push origin HEAD:feature/v0.2-asset-drivers
