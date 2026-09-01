@@ -1,9 +1,8 @@
-"""Algorithm 1 orchestration with V0.2 governed asset candidates.
+"""Algorithm 1 orchestration with governed multi-asset candidates.
 
-The Wiki loop remains unchanged: raw traces -> persistent wiki -> proposal ->
-held-out gate. V0.2 delegates candidate mutation to an asset driver so skill,
-prompt, and harness assets share one acceptance rule while core remains
-fail-closed.
+Raw traces and the persistent Wiki keep the original WikiSkill loop. Skill,
+prompt, harness, and core candidates share one strict held-out acceptance rule;
+V0.3 core candidates additionally pass trusted engineering gates first.
 """
 
 from __future__ import annotations
@@ -25,8 +24,14 @@ def repo_skills_dir() -> str:
 
 
 def init_workspace(ws: str) -> None:
-    for d in ("raw/traces", "wiki/patterns", "skills/active", "skills/framework",
-              "runs/proposals", "bench"):
+    for d in (
+        "raw/traces",
+        "wiki/patterns",
+        "skills/active",
+        "skills/framework",
+        "runs/proposals",
+        "bench",
+    ):
         os.makedirs(os.path.join(ws, d), exist_ok=True)
     gating.ensure_active_repo(ws)
     wiki.ensure(ws)
@@ -39,54 +44,108 @@ def init_workspace(ws: str) -> None:
             shutil.copytree(src, dst)
 
 
-def sample_traces(ws: str, it: int, train_results: list[dict],
-                  max_total: int = 8, max_fail: int = 5, max_pass: int = 3) -> list[dict]:
+def sample_traces(
+    ws: str,
+    it: int,
+    train_results: list[dict],
+    max_total: int = 8,
+    max_fail: int = 5,
+    max_pass: int = 3,
+) -> list[dict]:
     fails = [r for r in train_results if (r.get("score") or 0) < 1.0]
     passes = [r for r in train_results if (r.get("score") or 0) == 1.0]
     rng = random.Random(it)
-    picked = (rng.sample(fails, min(max_fail, len(fails))) +
-              rng.sample(passes, min(max_pass, len(passes))))
+    picked = (
+        rng.sample(fails, min(max_fail, len(fails)))
+        + rng.sample(passes, min(max_pass, len(passes)))
+    )[:max_total]
     out = []
-    for r in picked:
-        p = traces.transcript_path(ws, it, "train", r["id"])
-        out.append({"task_id": r["id"], "score": r.get("score"),
-                    "path": p if os.path.exists(p) else traces.meta_path(ws, it, "train", r["id"])})
+    for result in picked:
+        transcript = traces.transcript_path(ws, it, "train", result["id"])
+        path = (
+            transcript
+            if os.path.exists(transcript)
+            else traces.meta_path(ws, it, "train", result["id"])
+        )
+        out.append(
+            {"task_id": result["id"], "score": result.get("score"), "path": path}
+        )
     return out
 
 
-def maintain_step(ws: str, k: int, sampled: list[dict], runner=agents.run_agent,
-                  dry_run: bool = False) -> dict:
+def maintain_step(
+    ws: str,
+    k: int,
+    sampled: list[dict],
+    runner=agents.run_agent,
+    dry_run: bool = False,
+) -> dict:
     prompt = prompts.maintainer_prompt(ws, k, sampled)
     max_turns = assets.resolve_harness_value(ws, "maintainer_max_turns", 60)
     run_budget = assets.resolve_harness_value(ws, "maintainer_run_budget", 1500)
-    return runner(ws, prompt, tag=f"maintain-{k:02d}",
-                  toolsets=MAINTAINER_TOOLSETS, include_framework=True,
-                  dry_run=dry_run, max_turns=max_turns, run_budget=run_budget)
+    return runner(
+        ws,
+        prompt,
+        tag=f"maintain-{k:02d}",
+        toolsets=MAINTAINER_TOOLSETS,
+        include_framework=True,
+        dry_run=dry_run,
+        max_turns=max_turns,
+        run_budget=run_budget,
+    )
 
 
-def propose_step(ws: str, k: int, train_results: list[dict], runner=agents.run_agent,
-                 dry_run: bool = False) -> tuple[dict | None, dict]:
+def propose_step(
+    ws: str,
+    k: int,
+    train_results: list[dict],
+    runner=agents.run_agent,
+    dry_run: bool = False,
+) -> tuple[dict | None, dict]:
     prompt = prompts.proposer_prompt(ws, k, train_results)
     max_turns = assets.resolve_harness_value(ws, "proposer_max_turns", 60)
     run_budget = assets.resolve_harness_value(ws, "proposer_run_budget", 1800)
-    res = runner(ws, prompt, tag=f"propose-{k:02d}",
-                 toolsets=PROPOSER_TOOLSETS, include_framework=True,
-                 dry_run=dry_run, max_turns=max_turns, run_budget=run_budget)
-    ppath = os.path.join(ws, "runs", "proposals", f"iter-{k:02d}.json")
-    if dry_run or not os.path.exists(ppath):
-        return None, res
-    with open(ppath, encoding="utf-8") as f:
-        proposal = json.load(f)
-    return proposal, res
+    result = runner(
+        ws,
+        prompt,
+        tag=f"propose-{k:02d}",
+        toolsets=PROPOSER_TOOLSETS,
+        include_framework=True,
+        dry_run=dry_run,
+        max_turns=max_turns,
+        run_budget=run_budget,
+    )
+    path = os.path.join(ws, "runs", "proposals", f"iter-{k:02d}.json")
+    if dry_run or not os.path.exists(path):
+        return None, result
+    with open(path, encoding="utf-8") as handle:
+        proposal = json.load(handle)
+    return proposal, result
 
 
-def _history_entry(k: int, train_mean: float, *, target: str, action: str,
-         status: str, accepted: bool, proposal: str,
-         r_val: float | None = None, error: str | None = None,
-         engineering: dict | None = None) -> dict:
-    out = {"iter": k, "train_mean": train_mean, "r_val": r_val,
- "accepted": accepted, "proposal": proposal, "target": target,
- "action": action, "status": status}
+def _history_entry(
+    k: int,
+    train_mean: float,
+    *,
+    target: str,
+    action: str,
+    status: str,
+    accepted: bool,
+    proposal: str,
+    r_val: float | None = None,
+    error: str | None = None,
+    engineering: dict | None = None,
+) -> dict:
+    out = {
+        "iter": k,
+        "train_mean": train_mean,
+        "r_val": r_val,
+        "accepted": accepted,
+        "proposal": proposal,
+        "target": target,
+        "action": action,
+        "status": status,
+    }
     if error:
         out["error"] = error
     if engineering is not None:
@@ -94,9 +153,19 @@ def _history_entry(k: int, train_mean: float, *, target: str, action: str,
     return out
 
 
-def _engineering_evidence(proposal: dict, context=None, gate_results=None,
-                cleanup=None, finalize=None) -> dict | None:
-    if proposal.get("target") != "core" and not gate_results and cleanup is None and finalize is None:
+def _engineering_evidence(
+    proposal: dict,
+    context=None,
+    gate_results=None,
+    cleanup=None,
+    finalize=None,
+) -> dict | None:
+    if (
+        proposal.get("target") != "core"
+        and not gate_results
+        and cleanup is None
+        and finalize is None
+    ):
         return None
     out = {
         "source_id": proposal.get("source_id"),
@@ -110,42 +179,88 @@ def _engineering_evidence(proposal: dict, context=None, gate_results=None,
     if finalize is not None:
         out["finalize"] = finalize
         if isinstance(finalize, dict):
-  out["candidate_sha"] = finalize.get("candidate_sha", out["candidate_sha"])
-  out["accepted_sha"] = finalize.get("accepted_sha")
-  if finalize.get("cleanup") is not None:
-      out["cleanup"] = finalize["cleanup"]
+            out["candidate_sha"] = finalize.get(
+                "candidate_sha", out["candidate_sha"]
+            )
+            out["accepted_sha"] = finalize.get("accepted_sha")
+            if finalize.get("cleanup") is not None:
+                out["cleanup"] = finalize["cleanup"]
     return out
 
 
-def _record_outcome(ws: str, state: dict, k: int, train_mean: float,
-          proposal: dict, desc: str, diff: str, *, status: str,
-          accepted: bool, r_val: float | None, prev_best: float | None,
-          error: str | None = None, engineering: dict | None = None) -> None:
+def _record_outcome(
+    ws: str,
+    state: dict,
+    k: int,
+    train_mean: float,
+    proposal: dict,
+    desc: str,
+    diff: str,
+    *,
+    status: str,
+    accepted: bool,
+    r_val: float | None,
+    prev_best: float | None,
+    error: str | None = None,
+    engineering: dict | None = None,
+) -> None:
     target = proposal.get("target", "skill")
     action = proposal.get("action", "?")
-    state["history"].append(_history_entry(
-        k, train_mean, target=target, action=action, status=status,
-        accepted=accepted, proposal=desc, r_val=r_val, error=error,
-        engineering=engineering))
+    state["history"].append(
+        _history_entry(
+            k,
+            train_mean,
+            target=target,
+            action=action,
+            status=status,
+            accepted=accepted,
+            proposal=desc,
+            r_val=r_val,
+            error=error,
+            engineering=engineering,
+        )
+    )
     state["next_iter"] = k + 1
     gating.save_state(ws, state)
-    wiki.append_skill_impact(ws, prompts.gate_outcome_entry(
-        ws, k, proposal, r_val, accepted, diff, prev_best,
-        status=status, error=error, engineering=engineering))
-    wiki.append_log(
-        ws, f"iter-{k:02d}: train={train_mean} target={target} status={status} "
-  f"R_val={r_val} R_best={state['r_best']}"
-  + (f" error={error}" if error else ""))
+    wiki.append_skill_impact(
+        ws,
+        prompts.gate_outcome_entry(
+            ws,
+            k,
+            proposal,
+            r_val,
+            accepted,
+            diff,
+            prev_best,
+            status=status,
+            error=error,
+            engineering=engineering,
+        ),
+    )
+    log_line = (
+        f"iter-{k:02d}: train={train_mean} target={target} status={status} "
+        f"R_val={r_val} R_best={state['r_best']}"
+    )
+    if error:
+        log_line += f" error={error}"
+    wiki.append_log(ws, log_line)
     wiki.commit(ws, f"iter-{k:02d}: {status} target={target}")
 
 
-def evolve(ws: str, iters: int = 3, model: str | None = None,
- provider: str | None = None, runner=agents.run_agent,
- dry_run: bool = False, verbose: bool = True,
- max_turns: int | None = None, no_early_stop: bool = False) -> dict:
-    def log(msg: str) -> None:
+def evolve(
+    ws: str,
+    iters: int = 3,
+    model: str | None = None,
+    provider: str | None = None,
+    runner=agents.run_agent,
+    dry_run: bool = False,
+    verbose: bool = True,
+    max_turns: int | None = None,
+    no_early_stop: bool = False,
+) -> dict:
+    def log(message: str) -> None:
         if verbose:
-  print(f"[wikiskill] {msg}")
+            print(f"[wikiskill] {message}")
 
     splits = tasks_mod.splits(ws)
     train, val = splits["train"], splits["val"]
@@ -158,21 +273,43 @@ def evolve(ws: str, iters: int = 3, model: str | None = None,
 
     if state.get("baseline") is None:
         log(f"baseline validation: {len(val)} val tasks, S0=∅")
-        gate0 = gating.run_gate(ws, val, 0, model=model, runner=runner,
-                      dry_run=dry_run, overwrite=True, max_turns=max_turns)
+        gate0 = gating.run_gate(
+            ws,
+            val,
+            0,
+            model=model,
+            runner=runner,
+            dry_run=dry_run,
+            overwrite=True,
+            max_turns=max_turns,
+        )
         state["baseline"] = gate0["mean"]
         state["r_best"] = gate0["mean"]
-        wiki.append_log(ws, f"iter-00 baseline: R={gate0['mean']} (S0=∅, {len(val)} val tasks)")
+        wiki.append_log(
+            ws,
+            f"iter-00 baseline: R={gate0['mean']} (S0=∅, {len(val)} val tasks)",
+        )
         gating.save_state(ws, state)
 
     for k in range(state["next_iter"], iters + 1):
         if state["r_best"] == 1.0 and not no_early_stop:
-  log("R_best == 1.0 → early stop")
-  break
+            log("R_best == 1.0 → early stop")
+            break
+
         log(f"iter {k}/{iters}: train rollouts ({len(train)} tasks)")
-        train_results = [gating.run_task(ws, t, k, model=model, runner=runner,
-                               dry_run=dry_run, overwrite=True,
-                               max_turns=max_turns) for t in train]
+        train_results = [
+            gating.run_task(
+                ws,
+                task,
+                k,
+                model=model,
+                runner=runner,
+                dry_run=dry_run,
+                overwrite=True,
+                max_turns=max_turns,
+            )
+            for task in train
+        ]
         train_mean = gating.mean_score(train_results)
 
         sampled = sample_traces(ws, k, train_results)
@@ -181,160 +318,319 @@ def evolve(ws: str, iters: int = 3, model: str | None = None,
         wiki.commit(ws, f"iter-{k:02d}: maintainer updates")
 
         log(f"iter {k}: evolution proposal")
-        proposal, _ = propose_step(ws, k, train_results, runner=runner, dry_run=dry_run)
+        proposal, _ = propose_step(
+            ws, k, train_results, runner=runner, dry_run=dry_run
+        )
         raw = proposal if proposal is not None else {"action": "no_action"}
         try:
-  proposal = assets.normalize_proposal(raw)
+            proposal = assets.normalize_proposal(raw)
         except ValueError as exc:
-  target = raw.get("target", "skill") if isinstance(raw, dict) else "?"
-  action = raw.get("action", "?") if isinstance(raw, dict) else "?"
-  err = str(exc)
-  state["history"].append(_history_entry(
-      k, train_mean, target=target, action=action, status="invalid",
-      accepted=False, proposal=f"invalid {target}", error=err))
-  state["next_iter"] = k + 1
-  gating.save_state(ws, state)
-  wiki.append_skill_impact(ws, prompts.gate_outcome_entry(
-      ws, k, raw if isinstance(raw, dict) else {"raw": raw}, None,
-      False, "", state["r_best"], status="invalid", error=err))
-  wiki.append_log(ws, f"iter-{k:02d}: train={train_mean} proposal=invalid target={target}: {err}")
-  wiki.commit(ws, f"iter-{k:02d}: invalid proposal")
-  continue
+            target = raw.get("target", "skill") if isinstance(raw, dict) else "?"
+            action = raw.get("action", "?") if isinstance(raw, dict) else "?"
+            error = str(exc)
+            state["history"].append(
+                _history_entry(
+                    k,
+                    train_mean,
+                    target=target,
+                    action=action,
+                    status="invalid",
+                    accepted=False,
+                    proposal=f"invalid {target}",
+                    error=error,
+                )
+            )
+            state["next_iter"] = k + 1
+            gating.save_state(ws, state)
+            wiki.append_skill_impact(
+                ws,
+                prompts.gate_outcome_entry(
+                    ws,
+                    k,
+                    raw if isinstance(raw, dict) else {"raw": raw},
+                    None,
+                    False,
+                    "",
+                    state["r_best"],
+                    status="invalid",
+                    error=error,
+                ),
+            )
+            wiki.append_log(
+                ws,
+                f"iter-{k:02d}: train={train_mean} proposal=invalid "
+                f"target={target}: {error}",
+            )
+            wiki.commit(ws, f"iter-{k:02d}: invalid proposal")
+            continue
 
         target = proposal["target"]
         action = proposal["action"]
         if action == "no_action":
-  state["history"].append(_history_entry(
-      k, train_mean, target=target, action=action, status="no_action",
-      accepted=False, proposal="no_action"))
-  wiki.append_skill_impact(ws, prompts.gate_outcome_entry(
-      ws, k, proposal, None, False, "", state["r_best"], status="no_action"))
-  wiki.append_log(ws, f"iter-{k:02d}: train={train_mean} proposal=no_action")
-  state["next_iter"] = k + 1
-  gating.save_state(ws, state)
-  wiki.commit(ws, f"iter-{k:02d}: no action")
-  continue
+            state["history"].append(
+                _history_entry(
+                    k,
+                    train_mean,
+                    target=target,
+                    action=action,
+                    status="no_action",
+                    accepted=False,
+                    proposal="no_action",
+                )
+            )
+            wiki.append_skill_impact(
+                ws,
+                prompts.gate_outcome_entry(
+                    ws,
+                    k,
+                    proposal,
+                    None,
+                    False,
+                    "",
+                    state["r_best"],
+                    status="no_action",
+                ),
+            )
+            wiki.append_log(
+                ws, f"iter-{k:02d}: train={train_mean} proposal=no_action"
+            )
+            state["next_iter"] = k + 1
+            gating.save_state(ws, state)
+            wiki.commit(ws, f"iter-{k:02d}: no action")
+            continue
 
         driver = None
         context = None
         prepared = False
         desc = f"{action} {target}"
         diff = ""
-        pre_gates = []
+        pre_gates: list[dict] = []
         try:
-  driver = assets.resolve_driver(target)
-  driver.validate(ws, proposal)
-  context = driver.prepare(ws, k, proposal)
-  prepared = True
-  desc = driver.apply(ws, proposal, context)
-  diff = driver.diff(ws, context)
-  pre_gates = driver.pre_gates(ws, proposal, context)
+            driver = assets.resolve_driver(target)
+            driver.validate(ws, proposal)
+            context = driver.prepare(ws, k, proposal)
+            prepared = True
+            desc = driver.apply(ws, proposal, context)
+            diff = driver.diff(ws, context)
+            pre_gates = driver.pre_gates(ws, proposal, context)
         except core_adapter.CoreOperationalError as exc:
-  cleanup = None
-  rollback_error = None
-  if prepared and driver is not None:
-      try:
-          cleanup = driver.rollback(ws, context)
-      except Exception as rollback_exc:
-          rollback_error = str(rollback_exc)
-  err = str(exc)
-  if rollback_error:
-      err += f"; rollback failed: {rollback_error}"
-  engineering = _engineering_evidence(
-      proposal, context, pre_gates, cleanup=cleanup)
-  _record_outcome(
-      ws, state, k, train_mean, proposal, f"operational {target}", diff,
-      status="operational_error", accepted=False, r_val=None,
-      prev_best=state["r_best"], error=err, engineering=engineering)
-  continue
+            cleanup = None
+            rollback_error = None
+            if prepared and driver is not None:
+                try:
+                    cleanup = driver.rollback(ws, context)
+                except Exception as rollback_exc:
+                    rollback_error = str(rollback_exc)
+            error = str(exc)
+            if rollback_error:
+                error += f"; rollback failed: {rollback_error}"
+            engineering = _engineering_evidence(
+                proposal, context, pre_gates, cleanup=cleanup
+            )
+            _record_outcome(
+                ws,
+                state,
+                k,
+                train_mean,
+                proposal,
+                f"operational {target}",
+                diff,
+                status="operational_error",
+                accepted=False,
+                r_val=None,
+                prev_best=state["r_best"],
+                error=error,
+                engineering=engineering,
+            )
+            continue
         except ValueError as exc:
-  cleanup = None
-  if prepared and driver is not None:
-      try:
-          cleanup = driver.rollback(ws, context)
-      except Exception as rollback_exc:
-          engineering = _engineering_evidence(
-              proposal, context, pre_gates,
-              cleanup={"removed": False, "error": str(rollback_exc)})
-          _record_outcome(
-              ws, state, k, train_mean, proposal, f"operational {target}", diff,
-              status="operational_error", accepted=False, r_val=None,
-              prev_best=state["r_best"], error=str(rollback_exc),
-              engineering=engineering)
-          continue
-  err = str(exc)
-  engineering = _engineering_evidence(
-      proposal, context, pre_gates, cleanup=cleanup)
-  _record_outcome(
-      ws, state, k, train_mean, proposal, f"invalid {target}", diff,
-      status="invalid", accepted=False, r_val=None,
-      prev_best=state["r_best"], error=err, engineering=engineering)
-  continue
+            cleanup = None
+            if prepared and driver is not None:
+                try:
+                    cleanup = driver.rollback(ws, context)
+                except Exception as rollback_exc:
+                    engineering = _engineering_evidence(
+                        proposal,
+                        context,
+                        pre_gates,
+                        cleanup={"removed": False, "error": str(rollback_exc)},
+                    )
+                    _record_outcome(
+                        ws,
+                        state,
+                        k,
+                        train_mean,
+                        proposal,
+                        f"operational {target}",
+                        diff,
+                        status="operational_error",
+                        accepted=False,
+                        r_val=None,
+                        prev_best=state["r_best"],
+                        error=str(rollback_exc),
+                        engineering=engineering,
+                    )
+                    continue
+            engineering = _engineering_evidence(
+                proposal, context, pre_gates, cleanup=cleanup
+            )
+            _record_outcome(
+                ws,
+                state,
+                k,
+                train_mean,
+                proposal,
+                f"invalid {target}",
+                diff,
+                status="invalid",
+                accepted=False,
+                r_val=None,
+                prev_best=state["r_best"],
+                error=str(exc),
+                engineering=engineering,
+            )
+            continue
 
-        failed_gate = next((item for item in pre_gates if item.get("status") == "fail"), None)
+        failed_gate = next(
+            (item for item in pre_gates if item.get("status") == "fail"), None
+        )
         if failed_gate is not None:
-  try:
-      cleanup = driver.rollback(ws, context)
-  except core_adapter.CoreOperationalError as exc:
-      engineering = _engineering_evidence(
-          proposal, context, pre_gates,
-          cleanup={"removed": False, "error": str(exc)})
-      _record_outcome(
-          ws, state, k, train_mean, proposal, desc, diff,
-          status="operational_error", accepted=False, r_val=None,
-          prev_best=state["r_best"], error=str(exc),
-          engineering=engineering)
-      continue
-  engineering = _engineering_evidence(
-      proposal, context, pre_gates, cleanup=cleanup)
-  _record_outcome(
-      ws, state, k, train_mean, proposal, desc, diff,
-      status="rejected", accepted=False, r_val=None,
-      prev_best=state["r_best"],
-      error=failed_gate.get("summary") or f"{failed_gate.get('gate')} gate failed",
-      engineering=engineering)
-  continue
+            try:
+                cleanup = driver.rollback(ws, context)
+            except core_adapter.CoreOperationalError as exc:
+                engineering = _engineering_evidence(
+                    proposal,
+                    context,
+                    pre_gates,
+                    cleanup={"removed": False, "error": str(exc)},
+                )
+                _record_outcome(
+                    ws,
+                    state,
+                    k,
+                    train_mean,
+                    proposal,
+                    desc,
+                    diff,
+                    status="operational_error",
+                    accepted=False,
+                    r_val=None,
+                    prev_best=state["r_best"],
+                    error=str(exc),
+                    engineering=engineering,
+                )
+                continue
+            engineering = _engineering_evidence(
+                proposal, context, pre_gates, cleanup=cleanup
+            )
+            _record_outcome(
+                ws,
+                state,
+                k,
+                train_mean,
+                proposal,
+                desc,
+                diff,
+                status="rejected",
+                accepted=False,
+                r_val=None,
+                prev_best=state["r_best"],
+                error=(
+                    failed_gate.get("summary")
+                    or f"{failed_gate.get('gate')} gate failed"
+                ),
+                engineering=engineering,
+            )
+            continue
 
-        gatek = gating.run_gate(ws, val, k, model=model, runner=runner,
-                      dry_run=dry_run, overwrite=True, max_turns=max_turns)
+        gatek = gating.run_gate(
+            ws,
+            val,
+            k,
+            model=model,
+            runner=runner,
+            dry_run=dry_run,
+            overwrite=True,
+            max_turns=max_turns,
+        )
         r_val = gatek["mean"]
         prev_best = state["r_best"]
         accepted = r_val > prev_best
         if accepted:
-  try:
-      finalize = driver.accept(ws, k, r_val, context)
-  except core_adapter.CoreOperationalError as exc:
-      engineering = _engineering_evidence(
-          proposal, context, pre_gates,
-          finalize={"error": str(exc)})
-      _record_outcome(
-          ws, state, k, train_mean, proposal, desc, diff,
-          status="operational_error", accepted=False, r_val=r_val,
-          prev_best=prev_best, error=str(exc), engineering=engineering)
-      continue
-  state["r_best"] = r_val
-  status = "accepted"
-  engineering = _engineering_evidence(
-      proposal, context, pre_gates, finalize=finalize)
+            try:
+                finalize = driver.accept(ws, k, r_val, context)
+            except core_adapter.CoreOperationalError as exc:
+                engineering = _engineering_evidence(
+                    proposal,
+                    context,
+                    pre_gates,
+                    finalize={"error": str(exc)},
+                )
+                _record_outcome(
+                    ws,
+                    state,
+                    k,
+                    train_mean,
+                    proposal,
+                    desc,
+                    diff,
+                    status="operational_error",
+                    accepted=False,
+                    r_val=r_val,
+                    prev_best=prev_best,
+                    error=str(exc),
+                    engineering=engineering,
+                )
+                continue
+            state["r_best"] = r_val
+            status = "accepted"
+            engineering = _engineering_evidence(
+                proposal, context, pre_gates, finalize=finalize
+            )
         else:
-  try:
-      cleanup = driver.rollback(ws, context)
-  except core_adapter.CoreOperationalError as exc:
-      engineering = _engineering_evidence(
-          proposal, context, pre_gates,
-          cleanup={"removed": False, "error": str(exc)})
-      _record_outcome(
-          ws, state, k, train_mean, proposal, desc, diff,
-          status="operational_error", accepted=False, r_val=r_val,
-          prev_best=prev_best, error=str(exc), engineering=engineering)
-      continue
-  status = "rejected"
-  engineering = _engineering_evidence(
-      proposal, context, pre_gates, cleanup=cleanup)
+            try:
+                cleanup = driver.rollback(ws, context)
+            except core_adapter.CoreOperationalError as exc:
+                engineering = _engineering_evidence(
+                    proposal,
+                    context,
+                    pre_gates,
+                    cleanup={"removed": False, "error": str(exc)},
+                )
+                _record_outcome(
+                    ws,
+                    state,
+                    k,
+                    train_mean,
+                    proposal,
+                    desc,
+                    diff,
+                    status="operational_error",
+                    accepted=False,
+                    r_val=r_val,
+                    prev_best=prev_best,
+                    error=str(exc),
+                    engineering=engineering,
+                )
+                continue
+            status = "rejected"
+            engineering = _engineering_evidence(
+                proposal, context, pre_gates, cleanup=cleanup
+            )
 
         _record_outcome(
-  ws, state, k, train_mean, proposal, desc, diff,
-  status=status, accepted=accepted, r_val=r_val,
-  prev_best=prev_best, engineering=engineering)
+            ws,
+            state,
+            k,
+            train_mean,
+            proposal,
+            desc,
+            diff,
+            status=status,
+            accepted=accepted,
+            r_val=r_val,
+            prev_best=prev_best,
+            engineering=engineering,
+        )
 
     return state
