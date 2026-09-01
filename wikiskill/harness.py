@@ -244,8 +244,44 @@ def _record_outcome(
     if error:
         log_line += f" error={error}"
     wiki.append_log(ws, log_line)
-    wiki.commit(ws, f"iter-{k:02d}: {status} target={target}")
+    wiki.commit(ws, f"iter-{k:02d}: gate outcome {status} target={target}")
 
+
+def _driver_prepare(driver, target: str, ws: str, iteration: int, proposal: dict):
+    if target == "core":
+        return driver.prepare(ws, iteration, proposal)
+    driver.prepare(ws, iteration)
+    return None
+
+
+def _driver_apply(driver, target: str, ws: str, proposal: dict, context):
+    if target == "core":
+        return driver.apply(ws, proposal, context)
+    return driver.apply(ws, proposal)
+
+
+def _driver_diff(driver, target: str, ws: str, context):
+    if target == "core":
+        return driver.diff(ws, context)
+    return driver.diff(ws)
+
+
+def _driver_pre_gates(driver, target: str, ws: str, proposal: dict, context):
+    if target == "core":
+        return driver.pre_gates(ws, proposal, context)
+    return []
+
+
+def _driver_accept(driver, target: str, ws: str, iteration: int, score: float, context):
+    if target == "core":
+        return driver.accept(ws, iteration, score, context)
+    return driver.accept(ws, iteration, score)
+
+
+def _driver_rollback(driver, target: str, ws: str, context):
+    if target == "core":
+        return driver.rollback(ws, context)
+    return driver.rollback(ws)
 
 def evolve(
     ws: str,
@@ -408,17 +444,17 @@ def evolve(
         try:
             driver = assets.resolve_driver(target)
             driver.validate(ws, proposal)
-            context = driver.prepare(ws, k, proposal)
+            context = _driver_prepare(driver, target, ws, k, proposal)
             prepared = True
-            desc = driver.apply(ws, proposal, context)
-            diff = driver.diff(ws, context)
-            pre_gates = driver.pre_gates(ws, proposal, context)
+            desc = _driver_apply(driver, target, ws, proposal, context)
+            diff = _driver_diff(driver, target, ws, context)
+            pre_gates = _driver_pre_gates(driver, target, ws, proposal, context)
         except core_adapter.CoreOperationalError as exc:
             cleanup = None
             rollback_error = None
             if prepared and driver is not None:
                 try:
-                    cleanup = driver.rollback(ws, context)
+                    cleanup = _driver_rollback(driver, target, ws, context)
                 except Exception as rollback_exc:
                     rollback_error = str(rollback_exc)
             error = str(exc)
@@ -447,7 +483,7 @@ def evolve(
             cleanup = None
             if prepared and driver is not None:
                 try:
-                    cleanup = driver.rollback(ws, context)
+                    cleanup = _driver_rollback(driver, target, ws, context)
                 except Exception as rollback_exc:
                     engineering = _engineering_evidence(
                         proposal,
@@ -496,7 +532,7 @@ def evolve(
         )
         if failed_gate is not None:
             try:
-                cleanup = driver.rollback(ws, context)
+                cleanup = _driver_rollback(driver, target, ws, context)
             except core_adapter.CoreOperationalError as exc:
                 engineering = _engineering_evidence(
                     proposal,
@@ -558,7 +594,7 @@ def evolve(
         accepted = r_val > prev_best
         if accepted:
             try:
-                finalize = driver.accept(ws, k, r_val, context)
+                finalize = _driver_accept(driver, target, ws, k, r_val, context)
             except core_adapter.CoreOperationalError as exc:
                 engineering = _engineering_evidence(
                     proposal,
@@ -589,7 +625,7 @@ def evolve(
             )
         else:
             try:
-                cleanup = driver.rollback(ws, context)
+                cleanup = _driver_rollback(driver, target, ws, context)
             except core_adapter.CoreOperationalError as exc:
                 engineering = _engineering_evidence(
                     proposal,

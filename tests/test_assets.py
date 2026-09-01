@@ -144,13 +144,15 @@ def test_harness_reject_rollback_restores_exact_policy(tmp_path):
     assert assets.read_harness_policy(ws) == {"inference_max_turns": 9}
 
 
-def test_core_target_is_known_but_mutation_is_unsupported(tmp_path):
+def test_core_target_is_known_and_unregistered_source_fails_closed(tmp_path):
     d = assets.resolve_driver("core")
     assert d.target == "core"
-    with pytest.raises(ValueError, match="core adapter.*unsupported"):
-        d.validate(str(tmp_path), {
-            "target": "core",
-            "action": "patch",
-            "name": "runtime",
-            "manifest": {"adapter": "llama_cpp"},
-        })
+    proposal = {
+        "target": "core",
+        "action": "patch",
+        "source_id": "missing-core",
+        "base_sha": "0" * 40,
+        "edits": [{"file": "src/value.txt", "op": "append", "content": "x"}],
+    }
+    with pytest.raises(ValueError, match="unknown source_id"):
+        d.validate(str(tmp_path), proposal)
