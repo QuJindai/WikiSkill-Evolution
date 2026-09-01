@@ -22,15 +22,18 @@ jobs:
           from pathlib import Path
           p = Path('wikiskill/cli.py')
           text = p.read_text()
-          old = '''    r = gating.run_task(
-        ws, task, args.iter, dry_run=args.dry_run, overwrite=args.overwrite,
-        runner=lambda *a, **k: agents.run_agent(
-            *a, **k, max_turns=args.max_turns, run_budget=args.run_budget))'''
-          new = '''    r = gating.run_task(
-        ws, task, args.iter, dry_run=args.dry_run, overwrite=args.overwrite,
-        max_turns=args.max_turns,
-        runner=lambda *a, **k: agents.run_agent(
-            *a, **k, run_budget=args.run_budget))'''
+          old = (
+              "    r = gating.run_task(ws, t, args.iter, model=args.model, dry_run=args.dry_run,\n"
+              "                        runner=lambda *a, **k: agents.run_agent(\n"
+              "                            *a, **k, max_turns=args.max_turns,\n"
+              "                            run_budget=args.run_budget))"
+          )
+          new = (
+              "    r = gating.run_task(ws, t, args.iter, model=args.model, dry_run=args.dry_run,\n"
+              "                        max_turns=args.max_turns,\n"
+              "                        runner=lambda *a, **k: agents.run_agent(\n"
+              "                            *a, **k, run_budget=args.run_budget))"
+          )
           if old not in text:
               raise SystemExit('expected cmd_run_task block not found')
           p.write_text(text.replace(old, new, 1))
