@@ -1,0 +1,47 @@
+name: Diagnose V0.2 RED-5
+
+on:
+  push:
+    branches: [feature/v0.2-asset-drivers]
+    paths: ['.github/workflows/diag-v02-red5.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v0.2-asset-drivers
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run focused safety tests and capture traceback
+        run: |
+          pip install -e . pytest >/dev/null
+          set +e
+          python -m pytest tests/test_v02_safety.py -q -vv > /tmp/red5.txt 2>&1
+          code=$?
+          set -e
+          {
+            echo "# RED-5 diagnostic"
+            echo
+            echo "pytest_exit_code=$code"
+            echo
+            echo '```text'
+            cat /tmp/red5.txt
+            echo '```'
+          } > docs/superpowers/plans/2026-09-01-v0.2-red5-diagnostic.md
+      - name: Commit diagnostic and remove one-shot workflows
+        run: |
+          git config user.email wikiskill@local
+          git config user.name wikiskill-evolution
+          git add docs/superpowers/plans/2026-09-01-v0.2-red5-diagnostic.md
+          git rm .github/workflows/diag-v02-red5.yml
+          if [ -f .github/workflows/apply-v02-spec-align.yml ]; then git rm .github/workflows/apply-v02-spec-align.yml; fi
+          git commit -m 'test: capture RED-5 failure evidence'
+          git push origin HEAD:feature/v0.2-asset-drivers
+# retrigger: 2026-09-01
