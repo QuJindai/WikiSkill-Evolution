@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 
+from . import assets
+
 INFERENCE_PREFIX = (
     "You are an agent completing a task in a sandbox directory. "
     "Follow the instructions precisely. Use your tools to inspect files and "
@@ -18,7 +20,8 @@ INFERENCE_PREFIX = (
 )
 
 
-def inference_prompt(task: dict, sandbox: str | None = None) -> str:
+def inference_prompt(task: dict, sandbox: str | None = None,
+                     ws: str | None = None) -> str:
     anchor = ""
     if sandbox:
         anchor = (
@@ -30,7 +33,14 @@ def inference_prompt(task: dict, sandbox: str | None = None) -> str:
             "files above it). Verify the final file exists at its absolute path "
             "before finishing.\n"
         )
-    return INFERENCE_PREFIX + f"TASK: {task['title']}\n\n{task['prompt']}" + anchor
+    prefix = INFERENCE_PREFIX
+    overlay = assets.read_prompt_overlay(ws) if ws else ""
+    if overlay:
+        prefix += (
+            "WORKSPACE INFERENCE OVERLAY:\n"
+            f"{overlay.rstrip()}\n\n"
+        )
+    return prefix + f"TASK: {task['title']}\n\n{task['prompt']}" + anchor
 
 
 def _trace_manifest(traces: list[dict]) -> str:
