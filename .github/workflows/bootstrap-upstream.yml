@@ -1,0 +1,64 @@
+name: Bootstrap pinned WikiSkill upstream
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  import-upstream:
+    if: ${{ github.event.head_commit.message == 'bootstrap: stage upstream import' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone pinned upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/ashutoshsinghpr7/wikiskill.git /tmp/wikiskill-upstream
+          git -C /tmp/wikiskill-upstream checkout d4072d2e5e2949b0c1346c4158f7e49785d787de
+          test "$(git -C /tmp/wikiskill-upstream rev-parse HEAD)" = "d4072d2e5e2949b0c1346c4158f7e49785d787de"
+
+      - name: Replace target tree with pinned upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete --exclude '.git/' /tmp/wikiskill-upstream/ ./
+          cat > UPSTREAM.md <<'EOF'
+          # Upstream provenance
+
+          This repository was bootstrapped from the public MIT-licensed upstream WikiSkill implementation.
+
+          - Upstream: https://github.com/ashutoshsinghpr7/wikiskill
+          - Locked upstream commit: `d4072d2e5e2949b0c1346c4158f7e49785d787de`
+          - Paper: arXiv:2608.27454
+          - License: MIT (original `LICENSE` preserved)
+          - Import mode: commit-pinned full tree copy, including binary assets
+
+          This repository is an independent evolution workspace and is not the official Google Research repository.
+          EOF
+
+      - name: Verify imported source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e . pytest pyflakes
+          python3 -m pyflakes wikiskill/ tests/
+          python3 -m pytest tests/ -q
+
+      - name: Commit imported tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'bootstrap: import WikiSkill upstream d4072d2e'
+          git push origin HEAD:main
