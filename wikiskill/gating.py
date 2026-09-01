@@ -86,21 +86,25 @@ def _session_had_no_tool_calls(session_jsonl: str) -> bool:
 
 def run_task(ws: str, task: dict, it: int, *, model: str | None = None,
              runner=agents.run_agent, dry_run: bool = False,
-             overwrite: bool = False) -> dict:
-    """Inference rollout on one task + grading + trace capture."""
+             overwrite: bool = False, max_turns: int | None = None) -> dict:
+    """Inference rollout on one task + grading + trace capture.
+
+    Explicit max_turns wins; otherwise the active harness policy wins; otherwise
+    V0.1's default of 15 turns is preserved.
+    """
     from . import tasks as tasks_mod
 
     sandbox = tasks_mod.sandbox_dir(ws, task["id"])
     if not os.path.isdir(sandbox):
         sandbox = tasks_mod.materialize(ws, task)
     else:
-        # Fresh execution environment per rollout: never grade stale
-        # deliverables left by earlier runs (a dead agent run would otherwise
-        # score phantom values from the previous experiment).
         tasks_mod.materialize(ws, task, force=True)
     tag = f"iter-{it:02d}/{task['split']}/{task['id']}"
     prompt = prompts.inference_prompt(task, sandbox=sandbox, ws=ws)
-    res = runner(ws, prompt, tag=tag, workdir=sandbox, model=model, dry_run=dry_run)
+    resolved_turns = (max_turns if max_turns is not None else
+                      assets.resolve_harness_value(ws, "inference_max_turns", 15))
+    res = runner(ws, prompt, tag=tag, workdir=sandbox, model=model,
+                 dry_run=dry_run, max_turns=resolved_turns)
     score = None if dry_run else scoring.grade(task, sandbox)
     if not dry_run and res.get("session_file") and _session_had_no_tool_calls(res["session_file"]):
         print(f"[wikiskill] ⚠ task {task['id']} session made 0 tool calls "
@@ -125,9 +129,9 @@ def mean_score(results: list[dict]) -> float:
 
 def run_gate(ws: str, tasks: list[dict], it: int, *, model: str | None = None,
              runner=agents.run_agent, dry_run: bool = False,
-             overwrite: bool = False) -> dict:
+             overwrite: bool = False, max_turns: int | None = None) -> dict:
     """Validation rollout over a task split with the current active assets."""
     results = [run_task(ws, t, it, model=model, runner=runner, dry_run=dry_run,
-                        overwrite=overwrite)
+                        overwrite=overwrite, max_turns=max_turns)
                for t in tasks]
     return {"iter": it, "results": results, "mean": mean_score(results)}
