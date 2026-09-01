@@ -1,0 +1,40 @@
+name: Recover V0.3 Task 4 patch
+on:
+  push:
+    branches: [feature/v0.3-git-source-adapter]
+    paths: ['.github/workflows/recover-v03-task4.yml']
+permissions:
+  contents: write
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v0.3-git-source-adapter
+          fetch-depth: 0
+      - name: Execute embedded patch script safely
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/apply-v03-task4.yml').read_text()
+          begin = "          python - <<'PY'\n"
+          end = "\n          PY\n"
+          start = text.index(begin) + len(begin)
+          stop = text.index(end, start)
+          raw = text[start:stop]
+          lines = []
+          for line in raw.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          script = '\n'.join(lines) + '\n'
+          exec(compile(script, 'apply-v03-task4-embedded.py', 'exec'), {})
+          PY
+      - name: Commit recovered implementation
+        run: |
+          git config user.email wikiskill@local
+          git config user.name wikiskill-evolution
+          git add wikiskill/assets.py wikiskill/harness.py wikiskill/prompts.py
+          git rm .github/workflows/apply-v03-task4.yml
+          git rm .github/workflows/recover-v03-task4.yml
+          git commit -m 'feat: gate core source candidates in evolution loop'
+          git push origin HEAD:feature/v0.3-git-source-adapter
