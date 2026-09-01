@@ -212,8 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--provider", help="provider for --model (e.g. openrouter)")
     sp.add_argument("--backend", choices=sorted(backends.BACKENDS), default=None,
                     help="switch this workspace's agent backend before evolving")
-    sp.add_argument("--max-turns", type=int, default=15,
-                    help="per-task inference turn budget (tighter = harder)")
+    sp.add_argument("--max-turns", type=int, default=None,
+                    help="explicit per-task inference turn override; default uses active harness policy or 15")
     sp.add_argument("--no-early-stop", action="store_true",
                     help="run iterations even when R_best=1.0 (dev/demo knob; "
                          "Algorithm 1 would halt)")

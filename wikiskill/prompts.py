@@ -95,38 +95,61 @@ def proposer_prompt(ws: str, it: int, train_results: list[dict]) -> str:
     for r in sorted(train_results, key=lambda x: (x.get("score") or 0, x["id"])):
         rows.append(f"- {r['id']} [{r['split']}] score={r.get('score')}: {r['title']}")
     table = "\n".join(rows)
-    return f"""You are the Skill Proposer in a WikiSkill evolution loop (iteration {it}).
+    return f"""You are the Evolution Proposer in a WikiSkill evolution loop (iteration {it}).
 
 Load the `wikiskill-proposer` skill and follow it exactly.
 
 WORKSPACE: {ws}
 - Wiki: {wiki}/ (index.md, skill-impact.md, patterns/, log.md)
-- Raw traces: {os.path.join(ws, 'raw', 'traces', f'iter-{it:02d}')}/ (full execution logs,
-  read any trace you need via read_file)
+- Raw traces: {os.path.join(ws, 'raw', 'traces', f'iter-{it:02d}')}/
 - Active skills: {os.path.join(ws, 'skills', 'active')}/
+- Prompt assets: {os.path.join(ws, 'assets', 'prompts', 'active')}/
+- Harness assets: {os.path.join(ws, 'assets', 'harness', 'active')}/
 
 Training rollout summary this iteration:
 {table}
 
-Rules (from the paper's Appendix E.3):
-1. Read wiki/index.md FIRST, then wiki/skill-impact.md (contains full content of
-   rejected proposals — DO NOT repeat rejected approaches).
-2. Read relevant pattern pages, then read at least 4 execution traces for failed
-   tasks to diagnose root causes. Traces can be long — read selectively
-   (search_files for errors, read tails); do not read every line.
-3. Decide: create (new skill), patch (existing skill), or no_action.
-4. Write your proposal JSON to: {os.path.join(ws, 'runs', 'proposals', f'iter-{it:02d}.json')}
-   Create/patch skills under {os.path.join(ws, 'skills', 'active')} ONLY via the proposal file;
-   the harness applies it. The harness applies the proposal, validates it on the
-   validation split, and records the outcome in skill-impact.md.
-   WRITE EARLY — leave enough turns to finish the file before the cap.
+Rules:
+1. Read wiki/index.md FIRST, then wiki/skill-impact.md. Do not repeat rejected
+   or invalid approaches.
+2. Read relevant pattern pages and at least 4 failed execution traces before
+   proposing a mutation.
+3. Choose exactly one target: skill, prompt, harness, core, or no_action.
+4. The harness validates structure, applies the candidate through its Asset
+   Driver, runs the same held-out gate, and accepts only if R_val > R_best.
+5. Core mutation is unsupported in V0.2. Do not propose executable core
+   changes; use no_action instead when only a core mutation would help.
+6. Write exactly one JSON object to:
+   {os.path.join(ws, 'runs', 'proposals', f'iter-{it:02d}.json')}
 
-Proposal JSON schema (write the file with write_file):
-{{"action": "create", "name": "snake_case", "skill_md": "full SKILL.md with YAML frontmatter + When to Apply + When NOT to Apply + Instructions", "purpose_md": "Origin + Patterns Addressed + Evolution History"}}
-{{"action": "patch", "name": "existing-skill", "edits": [{{"op": "append"|"replace"|"insert_after", "target": "exact text", "content": "..."}}]}}
+Proposal schemas:
+Legacy skill compatibility:
+{{"action": "create", "name": "skill_name", "skill_md": "...", "purpose_md": "..."}}
+
+Skill:
+{{"target": "skill", "action": "create", "name": "skill_name", "skill_md": "...", "purpose_md": "..."}}
+{{"target": "skill", "action": "patch", "name": "skill_name", "edits": [{{"op": "append", "content": "..."}}]}}
+
+Prompt overlay (V0.2 name is fixed to inference):
+{{"target": "prompt", "action": "create", "name": "inference", "content": "..."}}
+{{"target": "prompt", "action": "patch", "name": "inference", "edits": [{{"op": "replace", "target": "exact text", "content": "..."}}]}}
+
+Harness policy (declarative only):
+{{"target": "harness", "action": "create", "name": "policy", "policy": {{"inference_max_turns": 8}}}}
+{{"target": "harness", "action": "patch", "name": "policy", "updates": {{"proposer_max_turns": 80}}}}
+Allowed policy keys: inference_max_turns, maintainer_max_turns,
+proposer_max_turns, maintainer_run_budget, proposer_run_budget.
+
+Core contract:
+{{"target": "core", "action": "patch", "name": "runtime", "manifest": {{"adapter": "none"}}}}
+Core adapter mutation is unsupported in V0.2 and will be recorded as invalid
+without running a validation rollout.
+
+No action:
 {{"action": "no_action"}}
-Prefer patching over creating when a skill is partially correct. Keep skills
-concise and actionable. If no change is warranted, write {{"action": "no_action"}}.
+
+Prefer the smallest transferable mutation supported by trace evidence. Keep
+skills/prompts concise. Harness changes must use only allowed typed policy keys.
 """
 
 
