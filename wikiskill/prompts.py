@@ -155,7 +155,8 @@ skills/prompts concise. Harness changes must use only allowed typed policy keys.
 
 def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
                        accepted: bool, diff: str, baseline_r: float | None,
-                       status: str | None = None, error: str | None = None) -> str:
+                       status: str | None = None, error: str | None = None,
+                       engineering: dict | None = None) -> str:
     prop_path = os.path.join(ws, "runs", "proposals", f"iter-{it:02d}.json")
     target = proposal.get("target", "skill") if isinstance(proposal, dict) else "?"
     action = proposal.get("action", "?") if isinstance(proposal, dict) else "?"
@@ -164,6 +165,7 @@ def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
         "accepted": "ACCEPTED",
         "rejected": "REJECTED",
         "invalid": "INVALID",
+        "operational_error": "OPERATIONAL_ERROR",
         "no_action": "NO_ACTION",
     }.get(effective, effective.upper())
     head = (f"### iter-{it:02d} — {label} "
@@ -181,6 +183,9 @@ def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
     ]
     if error:
         body += ["", f"Validation error: {error}"]
+    if engineering is not None:
+        body += ["", "Engineering evidence:", "", "```json",
+                 json.dumps(engineering, indent=2, sort_keys=True), "```"]
     if diff.strip():
         body += ["", "```diff", diff.strip(), "```"]
     body += [
@@ -190,6 +195,10 @@ def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
     ]
     if effective == "invalid":
         body += ["", "Validation: structural validation failed; no held-out rollout performed."]
+    elif effective == "operational_error":
+        body += ["", "Validation: operational failure; accepted source state and R_best were not advanced."]
+    elif effective == "rejected" and r_val is None:
+        body += ["", "Validation: engineering gate rejected the candidate before held-out rollout."]
     elif accepted:
         body += ["", f"Validation: {r_val} > R_best → accepted; candidate asset committed."]
     else:
