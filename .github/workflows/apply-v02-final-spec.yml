@@ -1,0 +1,38 @@
+name: Apply V0.2 final spec wording
+
+on:
+  push:
+    branches: [feature/v0.2-asset-drivers]
+    paths: ['.github/workflows/apply-v02-final-spec.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v0.2-asset-drivers
+          fetch-depth: 0
+      - name: Correct harness candidate timing sentence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('docs/superpowers/specs/2026-09-01-v0.2-asset-driver-design.md')
+          text = p.read_text()
+          old = 'When no explicit override is supplied, an applied harness candidate containing `inference_max_turns` affects its own train/validation inference calls and, after acceptance, subsequent runs. An explicit operator override intentionally masks that policy value for the current run.'
+          new = 'When no explicit override is supplied, an applied harness candidate containing `inference_max_turns` affects its own validation gate and, after acceptance, subsequent runs. An explicit operator override intentionally masks that policy value for the current run.'
+          if old not in text:
+              raise SystemExit('expected timing sentence not found')
+          p.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit wording correction
+        run: |
+          git config user.email wikiskill@local
+          git config user.name wikiskill-evolution
+          git add docs/superpowers/specs/2026-09-01-v0.2-asset-driver-design.md
+          git rm .github/workflows/apply-v02-final-spec.yml
+          git commit -m 'docs: correct v0.2 harness candidate timing'
+          git push origin HEAD:feature/v0.2-asset-drivers
