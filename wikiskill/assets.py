@@ -177,6 +177,9 @@ class SkillDriver(GitAssetDriver):
         if action == "create":
             if not isinstance(proposal.get("skill_md"), str):
                 raise ValueError("skill create requires skill_md text")
+            purpose = proposal.get("purpose_md")
+            if purpose is not None and not isinstance(purpose, str):
+                raise ValueError("purpose_md must be text")
         else:
             target_file = proposal.get("file", "SKILL.md")
             path = safe_asset_path(dest, target_file)

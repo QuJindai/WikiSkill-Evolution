@@ -167,13 +167,18 @@ def evolve(ws: str, iters: int = 3, model: str | None = None,
             wiki.commit(ws, f"iter-{k:02d}: no action")
             continue
 
+        driver = None
+        prepared = False
         try:
             driver = assets.resolve_driver(target)
             driver.validate(ws, proposal)
             driver.prepare(ws, k)
+            prepared = True
             desc = driver.apply(ws, proposal)
             diff = driver.diff(ws)
         except ValueError as exc:
+            if prepared and driver is not None:
+                driver.rollback(ws)
             err = str(exc)
             state["history"].append(_history_entry(
                 k, train_mean, target=target, action=action, status="invalid",
