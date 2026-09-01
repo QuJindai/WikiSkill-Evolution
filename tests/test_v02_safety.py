@@ -33,7 +33,7 @@ def test_harness_rolls_back_if_apply_fails_after_prepare(tmp_path, monkeypatch):
         "split": "train",
         "title": "T",
         "prompt": "P",
-        "sandbox": {},
+        "sandbox": {"input.txt": "fixture"},
         "grader": {"type": "contains", "file": "out.txt", "needle": "ok"},
     }
     val = dict(task, id="v1", split="val")
