@@ -1,0 +1,43 @@
+name: Apply V0.2 README summary
+
+on:
+  push:
+    branches: [feature/v0.2-asset-drivers]
+    paths: ['.github/workflows/apply-v02-readme.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v0.2-asset-drivers
+          fetch-depth: 0
+      - name: Insert V0.2 README section
+        env:
+          SECTION_B64: IyMgVjAuMjogZ292ZXJuZWQgbXVsdGktYXNzZXQgZXZvbHV0aW9uCgpUaGlzIGZvcmsgZXh0ZW5kcyBXaWtpU2tpbGwncyBjYW5kaWRhdGUgbGF5ZXIgYmV5b25kIGBTS0lMTC5tZGAgd2hpbGUga2VlcGluZwp0aGUgb3JpZ2luYWwgZXZpZGVuY2UgbG9vcCBhbmQgc3RyaWN0IGdhdGUgdW5jaGFuZ2VkOgoKYGBgCnJhdyB0cmFjZXMgLT4gcGVyc2lzdGVudCB3aWtpIC0+IHRhcmdldC1hd2FyZSBwcm9wb3NhbCAtPiBBc3NldCBEcml2ZXIKICAgICAgICAgICAtPiBoZWxkLW91dCB2YWxpZGF0aW9uIC0+IGFjY2VwdCAvIHJvbGxiYWNrCmBgYAoKVjAuMiBzdXBwb3J0cyBnYXRlZCBgc2tpbGxgLCBgcHJvbXB0YCwgYW5kIGRlY2xhcmF0aXZlIGBoYXJuZXNzYCBjYW5kaWRhdGVzLgpgY29yZWAgaXMgZGVsaWJlcmF0ZWx5IGNvbnRyYWN0LW9ubHkgYW5kIGZhaWwtY2xvc2VkIGluIHRoaXMgcGhhc2U6IGl0IGNhbm5vdAplZGl0IHJ1bnRpbWUgc291cmNlLCBydW4gYnVpbGQgY29tbWFuZHMsIG9yIG1vZGlmeSBtb2RlbCB3ZWlnaHRzLiBMZWdhY3kKcHJvcG9zYWxzIHdpdGhvdXQgYSBgdGFyZ2V0YCBzdGlsbCBiZWhhdmUgYXMgYHRhcmdldD0ic2tpbGwiYC4KClNlZSBbVjAuMiBBc3NldCBEcml2ZXJzXShkb2NzL1YwLjItQVNTRVQtRFJJVkVSUy5tZCkgZm9yIHNjaGVtYXMsIHdvcmtzcGFjZQpwYXRocywgcG9saWN5IHByZWNlZGVuY2UsIGFuZCBzYWZldHkgYm91bmRhcmllcy4KCg==
+        run: |
+          python - <<'PY'
+          import base64, os
+          from pathlib import Path
+          p = Path('README.md')
+          text = p.read_text()
+          section = base64.b64decode(os.environ['SECTION_B64']).decode()
+          marker = '## Why Hermes?\n'
+          if '## V0.2: governed multi-asset evolution' not in text:
+              if marker not in text:
+                  raise SystemExit('README insertion marker not found')
+              text = text.replace(marker, section + marker, 1)
+              p.write_text(text)
+          PY
+      - name: Commit README update
+        run: |
+          git config user.email wikiskill@local
+          git config user.name wikiskill-evolution
+          git add README.md
+          git rm .github/workflows/apply-v02-readme.yml
+          git commit -m 'docs: add v0.2 README summary'
+          git push origin HEAD:feature/v0.2-asset-drivers
