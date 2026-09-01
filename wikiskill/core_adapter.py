@@ -447,14 +447,7 @@ def _cleanup_worktree(session: CandidateSession) -> dict:
 
 
 def reject_candidate(session: CandidateSession) -> dict:
-    cleanup = _cleanup_worktree(session)
-    return {
-        "source_id": session.source_id,
-        "base_sha": session.base_sha,
-        "candidate_sha": session.candidate_sha,
-        "cleanup": cleanup,
-        "accepted_sha": sources.accepted_sha(session.ws, session.source_id),
-    }
+    return _cleanup_worktree(session)
 
 
 def _stage_expected_files(session: CandidateSession) -> None:
