@@ -37,3 +37,28 @@ def test_cli_evolve_default_does_not_override_harness_policy(tmp_path, monkeypat
 
     assert cli.main(["evolve", "demo", "--ws", ws, "--max-turns", "21"]) == 0
     assert captured[-1]["max_turns"] == 21
+
+
+def test_cli_run_task_forwards_max_turns_once(tmp_path, monkeypatch):
+    ws = _workspace(tmp_path)
+    task_id = tasks_mod.load(ws)[0]["id"]
+    captured = []
+
+    def fake_agent(*args, **kwargs):
+        captured.append(kwargs)
+        return {
+            "cmd": ["fake-agent"],
+            "exit_code": 0,
+            "duration_s": 0.0,
+            "stdout_path": None,
+            "session_file": None,
+            "dry_run": True,
+        }
+
+    monkeypatch.setattr(cli.agents, "run_agent", fake_agent)
+    assert cli.main([
+        "run-task", "demo", "--ws", ws, task_id,
+        "--dry-run", "--max-turns", "19",
+    ]) == 0
+    assert captured[-1]["max_turns"] == 19
+    assert captured[-1]["run_budget"] == 300
