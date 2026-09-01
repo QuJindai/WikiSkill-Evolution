@@ -1,38 +1,29 @@
 # WikiSkill for Hermes
 
-**Compile agent experience into a persistent wiki — and let skills evolve themselves.**
+**Compile agent experience into a persistent wiki — and let governed assets evolve.**
 
-WikiSkill is a Google Research framework (arXiv:2608.27454) that co-evolves
-agent skills with a persistent knowledge base. This repository is a faithful
-implementation for **Hermes Agent**, with a live, documented run log on real
-models.
+WikiSkill is based on the Google Research paper arXiv:2608.27454. This repository is an independent MIT-licensed evolution workspace based on the community implementation, with a live documented run log and a V0.2 multi-asset extension.
 
 ## The loop
 
-```
-raw experience ──► persistent wiki ──► skill proposals ──► gated rollout
-(session traces)   (pattern pages)      (SKILL.md)         R_val > R_best ?
+```text
+raw experience -> persistent wiki -> target-aware proposal -> Asset Driver -> gated rollout
+(session traces)   (pattern pages)    (skill/prompt/harness)   R_val > R_best ?
 ```
 
-1. **Raw layer** — agents execute tasks; full transcripts are captured.
-2. **Wiki maintainer** — distills low-scoring traces into pattern pages in a
-   persistent wiki (never rolled back — knowledge accumulates).
-3. **Skill proposer** — proposes new skills from wiki patterns + trace
-   evidence, with full rejected proposals kept visible (anti-repetition).
-4. **Gating** — the candidate skill is rolled out on held-out tasks; accepted
-   iff `R_val > R_best`, otherwise git-rolled-back. The wiki is always kept.
+1. **Raw layer** — agents execute tasks; full transcripts are captured and remain immutable.
+2. **Wiki maintainer** — distills low-scoring traces into persistent pattern pages.
+3. **Evolution proposer** — can propose `skill`, `prompt`, or declarative `harness` candidates; `core` is a fail-closed contract in V0.2.
+4. **Gating** — the candidate runs on held-out tasks and is accepted iff `R_val > R_best`; rejection rolls back only the candidate asset while the Wiki remains.
+
+See [V0.2 Multi-Asset Evolution](V0.2-ASSET-DRIVERS.md) for schemas, asset paths, policy precedence, and safety boundaries.
 
 ## Why this repo
 
-- **The full loop, live** — every phase runs on a real agent (Hermes) with
-  isolated per-workspace profiles; see the [Run Log](RUNS.md).
-- **Small-model story proven** — a free-tier model failed at baseline (0.67),
-  and gating caught a *harmful* proposed skill live (R dropped to 0.44) and
-  rolled it back.
-- **Honest by construction** — fresh sandboxes per rollout (no stale grading),
-  zero-tool-call launch-failure detection, paired statistical comparison
-  ([Comparing runs](COMPARING.md)), and a documented list of bugs found and
-  fixed during development.
+- **One common gate** — skill, prompt, and harness candidates share the same strict held-out validation rule.
+- **Backward compatible** — legacy proposals without `target` still behave as skill proposals.
+- **Fail closed** — invalid targets/policies skip validation, and core/source mutation is not executable in V0.2.
+- **Honest by construction** — fresh sandboxes, zero-tool-call detection, full rejected/invalid proposal audit, and paired statistical comparison remain intact.
 
 ## Quickstart
 
@@ -43,4 +34,4 @@ wikiskill evolve demo --iters 1 --model google/gemini-2.5-flash-lite --provider 
 wikiskill status demo
 ```
 
-Runs cost ≈ $0.09/iteration on free-tier models. See the [full README](https://github.com/ashutoshsinghpr7/wikiskill#readme) for the complete guide, CLI reference, and design decisions.
+See the repository README for the full CLI and the [Run Log](RUNS.md) for historical real-model experiments.

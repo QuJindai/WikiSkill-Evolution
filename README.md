@@ -45,6 +45,24 @@ Over iterations, knowledge compounds in the wiki while only *proven* improvement
                 └──────────────────────────────────────────────────────┘
 ```
 
+## V0.2: governed multi-asset evolution
+
+This fork extends WikiSkill's candidate layer beyond `SKILL.md` while keeping
+the original evidence loop and strict gate unchanged:
+
+```
+raw traces -> persistent wiki -> target-aware proposal -> Asset Driver
+           -> held-out validation -> accept / rollback
+```
+
+V0.2 supports gated `skill`, `prompt`, and declarative `harness` candidates.
+`core` is deliberately contract-only and fail-closed in this phase: it cannot
+edit runtime source, run build commands, or modify model weights. Legacy
+proposals without a `target` still behave as `target="skill"`.
+
+See [V0.2 Asset Drivers](docs/V0.2-ASSET-DRIVERS.md) for schemas, workspace
+paths, policy precedence, and safety boundaries.
+
 ## Why Hermes?
 
 This is not a toy simulator. Every component is a **real Hermes agent turn**:

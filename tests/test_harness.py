@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 
-from wikiskill import agents, bench, gating, harness, tasks as tasks_mod
+from wikiskill import agents, assets, bench, gating, harness, tasks as tasks_mod
 
 
 def build_ws(tmp_path, seed=7):
@@ -33,6 +33,7 @@ class FakeRunner:
         self.train_pass = train_pass or {}
         self.proposals = proposals or {}
         self.calls = []
+        self.call_kwargs = []
 
     def _pass_set(self, ws, tag):
         parts = tag.split("/")
@@ -43,6 +44,7 @@ class FakeRunner:
 
     def __call__(self, ws, prompt, *, tag, workdir=None, dry_run=False, **kw):
         self.calls.append(tag)
+        self.call_kwargs.append((tag, dict(kw)))
         if dry_run:
             return {"cmd": ["hermes", "chat"], "dry_run": True}
         wd = workdir or ws
@@ -104,14 +106,28 @@ def _proposal_patch():
     }
 
 
+def _prompt_create(text="Verify units twice."):
+    return {"target": "prompt", "action": "create", "name": "inference",
+            "content": text}
+
+
+def _harness_create(turns=7):
+    return {"target": "harness", "action": "create", "name": "policy",
+            "policy": {"inference_max_turns": turns,
+                       "maintainer_max_turns": 71,
+                       "proposer_max_turns": 72,
+                       "maintainer_run_budget": 1700,
+                       "proposer_run_budget": 1900}}
+
+
 # ---------------------------------------------------------------- harness loop
 
 
 def test_evolve_accept_path(tmp_path):
     ws = build_ws(tmp_path)
     val = val_ids(ws)
-    baseline_pass = set(val[:2])           # R0 = 2/6
-    iter1_pass = set(val[:4])              # R1 = 4/6 > R0 → accept
+    baseline_pass = set(val[:2])
+    iter1_pass = set(val[:4])
     runner = FakeRunner(
         val_pass={0: baseline_pass, 1: iter1_pass},
         proposals={1: _proposal_create()},
@@ -123,7 +139,6 @@ def test_evolve_accept_path(tmp_path):
     assert "spec_literal_transform" in os.listdir(active)
     impact = open(os.path.join(ws, "wiki", "skill-impact.md")).read()
     assert "ACCEPTED" in impact
-    # order per Algorithm 1: train → maintain → propose → gate
     joined = "|".join(runner.calls)
     assert joined.index("iter-01/train/") < joined.index("maintain-01")
     assert joined.index("maintain-01") < joined.index("propose-01")
@@ -133,17 +148,15 @@ def test_evolve_accept_path(tmp_path):
 def test_evolve_reject_rolls_back_skills_keeps_wiki(tmp_path):
     ws = build_ws(tmp_path)
     val = val_ids(ws)
-    baseline_pass = set(val[:3])           # R0 = 3/6
+    baseline_pass = set(val[:3])
     runner = FakeRunner(
-        val_pass={0: baseline_pass, 1: baseline_pass},  # no improvement
+        val_pass={0: baseline_pass, 1: baseline_pass},
         proposals={1: _proposal_create()},
     )
     state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
     assert state["r_best"] == round(3 / len(val), 4)
     assert state["history"][0]["accepted"] is False
-    # skills rolled back to S0 (empty — only .git remains)
     assert [d for d in os.listdir(gating.active_dir(ws)) if not d.startswith(".")] == []
-    # wiki retained even though rejected
     impact = open(os.path.join(ws, "wiki", "skill-impact.md")).read()
     assert "REJECTED" in impact
     assert os.path.exists(os.path.join(ws, "wiki", "patterns", "test.md"))
@@ -157,7 +170,7 @@ def test_evolve_no_action_skips_gate(tmp_path):
     )
     state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
     assert state["next_iter"] == 2
-    assert not any("iter-01/val/" in c for c in runner.calls)  # gate skipped
+    assert not any("iter-01/val/" in c for c in runner.calls)
 
 
 def test_evolve_early_stop_at_perfect(tmp_path):
@@ -166,7 +179,7 @@ def test_evolve_early_stop_at_perfect(tmp_path):
     runner = FakeRunner(val_pass={0: set(val)})
     state = harness.evolve(ws, iters=5, runner=runner, verbose=False)
     assert state["r_best"] == 1.0
-    assert len(state["history"]) == 0  # never got to iter 1
+    assert len(state["history"]) == 0
 
 
 def test_evolve_no_early_stop_flag(tmp_path):
@@ -178,7 +191,85 @@ def test_evolve_no_early_stop_flag(tmp_path):
     )
     state = harness.evolve(ws, iters=1, runner=runner, verbose=False,
                            no_early_stop=True)
-    assert len(state["history"]) == 1  # ran despite R_best == 1.0
+    assert len(state["history"]) == 1
+
+
+def test_evolve_accepts_prompt_candidate(tmp_path):
+    ws = build_ws(tmp_path)
+    val = val_ids(ws)
+    runner = FakeRunner(
+        val_pass={0: set(val[:2]), 1: set(val[:4])},
+        proposals={1: _prompt_create("PROMPT-WIN")},
+    )
+    state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
+    assert state["history"][0]["accepted"] is True
+    assert state["history"][0]["target"] == "prompt"
+    assert "PROMPT-WIN" in assets.read_prompt_overlay(ws)
+
+
+def test_evolve_rejects_prompt_and_restores_previous_overlay(tmp_path):
+    ws = build_ws(tmp_path)
+    d = assets.resolve_driver("prompt")
+    d.prepare(ws, 0)
+    base = _prompt_create("BASE-PROMPT")
+    d.validate(ws, base); d.apply(ws, base); d.accept(ws, 0, 0.0)
+    val = val_ids(ws)
+    runner = FakeRunner(
+        val_pass={0: set(val[:3]), 1: set(val[:3])},
+        proposals={1: {"target": "prompt", "action": "patch", "name": "inference",
+                       "edits": [{"op": "append", "content": "BAD-PROMPT"}]}}
+    )
+    state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
+    assert state["history"][0]["accepted"] is False
+    assert assets.read_prompt_overlay(ws) == "BASE-PROMPT"
+
+
+def test_evolve_accepts_harness_candidate(tmp_path):
+    ws = build_ws(tmp_path)
+    val = val_ids(ws)
+    runner = FakeRunner(
+        val_pass={0: set(val[:1]), 1: set(val[:4])},
+        proposals={1: _harness_create(7)},
+    )
+    state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
+    assert state["history"][0]["accepted"] is True
+    assert state["history"][0]["target"] == "harness"
+    assert assets.read_harness_policy(ws)["inference_max_turns"] == 7
+
+
+def test_invalid_candidate_is_audited_and_skips_gate(tmp_path):
+    ws = build_ws(tmp_path)
+    runner = FakeRunner(
+        val_pass={0: set(val_ids(ws)[:2])},
+        proposals={1: {"target": "repo_python", "action": "patch", "name": "x"}},
+    )
+    state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
+    assert state["history"][0]["status"] == "invalid"
+    assert state["history"][0]["target"] == "repo_python"
+    assert not any("iter-01/val/" in c for c in runner.calls)
+    impact = open(os.path.join(ws, "wiki", "skill-impact.md"), encoding="utf-8").read()
+    assert "repo_python" in impact
+    assert "invalid" in impact.lower()
+    assert state["next_iter"] == 2
+
+
+def test_active_harness_policy_controls_role_budgets(tmp_path):
+    ws = build_ws(tmp_path)
+    d = assets.resolve_driver("harness")
+    d.prepare(ws, 0)
+    p = _harness_create(7)
+    d.validate(ws, p); d.apply(ws, p); d.accept(ws, 0, 0.0)
+    runner = FakeRunner(
+        val_pass={0: set(val_ids(ws)[:1])},
+        proposals={1: {"action": "no_action"}},
+    )
+    harness.evolve(ws, iters=1, runner=runner, verbose=False)
+    inference_kwargs = [kw for tag, kw in runner.call_kwargs if "/train/" in tag or "/val/" in tag]
+    assert inference_kwargs and all(kw.get("max_turns") == 7 for kw in inference_kwargs)
+    maintain_kw = next(kw for tag, kw in runner.call_kwargs if tag == "maintain-01")
+    propose_kw = next(kw for tag, kw in runner.call_kwargs if tag == "propose-01")
+    assert maintain_kw["max_turns"] == 71 and maintain_kw["run_budget"] == 1700
+    assert propose_kw["max_turns"] == 72 and propose_kw["run_budget"] == 1900
 
 
 # ---------------------------------------------------------------- agents / gating
@@ -205,8 +296,6 @@ def test_bootstrap_and_dry_run(tmp_path, monkeypatch):
 
 
 def test_patch_profile_model_rewrites_config(tmp_path):
-    """Profile model patching: default model + provider replaced, broken moa
-    fallback stripped (it carries the literal 'model: default' placeholder)."""
     prof = tmp_path / ".hermes-home"
     (prof / "sessions").mkdir(parents=True)
     cfg = prof / "config.yaml"
@@ -226,25 +315,22 @@ def test_patch_profile_model_rewrites_config(tmp_path):
     assert "default: google/gemini-2.5-flash-lite" in text
     assert "provider: openrouter" in text
     assert "fallback_providers" not in text
-    assert "max_turns: 500" in text  # unrelated config preserved
+    assert "max_turns: 500" in text
 
 
 def test_fresh_sandbox_prevents_stale_scores(tmp_path):
-    """A dead agent run must score 0.0, never a stale deliverable from a
-    previous experiment (the regression that phantom-graded the gemma run)."""
     ws = build_ws(tmp_path, seed=7)
     task = [t for t in tasks_mod.load(ws) if t["id"] == "csv-north-count"][0]
     sandbox = tasks_mod.sandbox_dir(ws, task["id"])
-    # Simulate a prior experiment leaving a correct-looking deliverable.
     with open(os.path.join(sandbox, "answer.txt"), "w") as f:
         f.write(task["grader"]["expected"])
-    assert scoring_grade(task, sandbox) == 1.0  # stale file would pass
+    assert scoring_grade(task, sandbox) == 1.0
 
     def dead_runner(*a, **k):
         return {"exit_code": 0, "session_file": None, "stdout_path": None}
 
     res = gating.run_task(ws, task, 1, runner=dead_runner)
-    assert res["score"] == 0.0  # fresh sandbox → no deliverable → honest 0
+    assert res["score"] == 0.0
 
 
 def scoring_grade(task, sandbox):
@@ -258,7 +344,7 @@ def test_zero_tool_call_session_detected(tmp_path):
     assert gating._session_had_no_tool_calls(str(p)) is True
     p.write_text('{"id":"x","tool_call_count":9,"message_count":18}\n')
     assert gating._session_had_no_tool_calls(str(p)) is False
-    p.write_text('{"role":"user","content":"x"}\n')  # legacy/fake format
+    p.write_text('{"role":"user","content":"x"}\n')
     assert gating._session_had_no_tool_calls(str(p)) is False
 
 
@@ -270,8 +356,6 @@ def test_evolve_accepts_provider_kwarg():
 
 
 def test_wiki_gets_audit_trail_commits(tmp_path):
-    """Every maintainer update and gate outcome is committed to the wiki git
-    history — knowledge persists with a full audit trail."""
     ws = build_ws(tmp_path)
     val = val_ids(ws)
     runner = FakeRunner(

@@ -138,9 +138,9 @@ def cmd_run_task(args) -> int:
         print(f"unknown task: {args.task_id}")
         return 1
     r = gating.run_task(ws, t, args.iter, model=args.model, dry_run=args.dry_run,
+                        max_turns=args.max_turns,
                         runner=lambda *a, **k: agents.run_agent(
-                            *a, **k, max_turns=args.max_turns,
-                            run_budget=args.run_budget))
+                            *a, **k, run_budget=args.run_budget))
     print(f"task {t['id']}: score={r.get('score')}")
     if r.get("result", {}).get("cmd") and args.dry_run:
         print("cmd: " + " ".join(r["result"]["cmd"]))
@@ -212,8 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--provider", help="provider for --model (e.g. openrouter)")
     sp.add_argument("--backend", choices=sorted(backends.BACKENDS), default=None,
                     help="switch this workspace's agent backend before evolving")
-    sp.add_argument("--max-turns", type=int, default=15,
-                    help="per-task inference turn budget (tighter = harder)")
+    sp.add_argument("--max-turns", type=int, default=None,
+                    help="explicit per-task inference turn override; default uses active harness policy or 15")
     sp.add_argument("--no-early-stop", action="store_true",
                     help="run iterations even when R_best=1.0 (dev/demo knob; "
                          "Algorithm 1 would halt)")
