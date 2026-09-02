@@ -63,6 +63,29 @@ proposals without a `target` still behave as `target="skill"`.
 See [V0.2 Asset Drivers](docs/V0.2-ASSET-DRIVERS.md) for schemas, workspace
 paths, policy precedence, and safety boundaries.
 
+## V0.3: governed Git source evolution
+
+V0.3 makes `core` executable without turning proposals into arbitrary code
+runners. Operators pre-register a local Git source plus immutable path and Gate
+policy; the Evolution Proposer may then submit a bounded text patch against the
+current accepted SHA.
+
+```text
+trusted Source Registry -> bounded Core proposal -> isolated Git worktree
+                        -> Static -> Build -> Regression -> optional Performance
+                        -> held-out R_val > R_best -> accept-ref advance / rollback
+```
+
+`refs/wikiskill/<source_id>/accepted` is the authoritative accepted source
+baseline. Repository identity, allow/deny rules, and Gate profiles are trusted
+configuration; proposals cannot supply shell commands, credentials, repository
+URLs, or Gate definitions. V0.3 remains text-only and does not install APKs,
+modify model weights, or run phone/device gates.
+
+See [V0.3 Git Source Adapter](docs/V0.3-GIT-SOURCE-ADAPTER.md) for the Source
+Manifest, Core proposal schema, worktree lifecycle, engineering gates, Source
+CLI, audit model, and V0.4 boundary.
+
 ## Why Hermes?
 
 This is not a toy simulator. Every component is a **real Hermes agent turn**:
@@ -112,6 +135,10 @@ workspaces/demo/
 | `wikiskill status` | Workspace state: scores, skills, wiki, history |
 | `wikiskill evolve --iters N [--model M] [--provider P] [--max-turns N] [--no-early-stop]` | The full loop (`--model`/`--provider` patch the isolated profile's default model, e.g. `google/gemini-2.5-flash-lite` + `openrouter`) |
 | `wikiskill run-task <id>` | Single inference rollout (debug) |
+| `wikiskill source register <manifest> [--ws PATH]` | Register a trusted local Git source manifest |
+| `wikiskill source list [--ws PATH]` | List registered sources and accepted SHAs |
+| `wikiskill source inspect <source_id> [--ws PATH]` | Inspect trusted manifest + accepted-state mirror |
+| `wikiskill source validate <source_id> [--ws PATH]` | Revalidate repository/ref/policy/Gate registration |
 | `wikiskill compare <wsA> <wsB> [--iters N]` | Paired statistical comparison: per-task win/loss/tie + two-sided exact-binomial p-value (answers "did the skill actually help?" — see [docs/COMPARING.md](docs/COMPARING.md)) |
 
 ## Bring your own tasks
