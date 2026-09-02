@@ -579,6 +579,59 @@ def evolve(
             )
             continue
 
+        if target == "core" and not getattr(
+            driver, "candidate_runtime_bound", False
+        ):
+            try:
+                cleanup = _driver_rollback(driver, target, ws, context)
+            except core_adapter.CoreOperationalError as exc:
+                engineering = _engineering_evidence(
+                    proposal,
+                    context,
+                    pre_gates,
+                    cleanup={"removed": False, "error": str(exc)},
+                )
+                _record_outcome(
+                    ws,
+                    state,
+                    k,
+                    train_mean,
+                    proposal,
+                    desc,
+                    diff,
+                    status="operational_error",
+                    accepted=False,
+                    r_val=None,
+                    prev_best=state["r_best"],
+                    error=str(exc),
+                    engineering=engineering,
+                )
+                continue
+            error = (
+                "core candidate runtime binding is not configured; held-out "
+                "validation would execute the current runtime instead of the "
+                "candidate runtime"
+            )
+            engineering = _engineering_evidence(
+                proposal, context, pre_gates, cleanup=cleanup
+            )
+            _record_outcome(
+                ws,
+                state,
+                k,
+                train_mean,
+                proposal,
+                desc,
+                diff,
+                status="operational_error",
+                accepted=False,
+                r_val=None,
+                prev_best=state["r_best"],
+                error=error,
+                engineering=engineering,
+            )
+            continue
+
         gatek = gating.run_gate(
             ws,
             val,

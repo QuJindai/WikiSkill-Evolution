@@ -297,6 +297,7 @@ class HarnessDriver(GitAssetDriver):
 
 class CoreDriver(GitAssetDriver):
     target = "core"
+    candidate_runtime_bound = False
 
     def root(self, ws: str) -> str:
         return os.path.join(ws, "assets", "core", "active")

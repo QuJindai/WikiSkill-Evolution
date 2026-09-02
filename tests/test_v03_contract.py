@@ -70,6 +70,7 @@ def _wire_proposal(monkeypatch, proposal=None):
 
 class FakeCoreDriver:
     target = "core"
+    candidate_runtime_bound = True
 
     def __init__(self, pre_gates=None, operational=False):
         self.events = []
