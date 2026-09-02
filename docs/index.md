@@ -27,6 +27,7 @@ See [V0.2 Multi-Asset Evolution](V0.2-ASSET-DRIVERS.md) for the Asset Driver fou
 
 - **One strict capability gate** — evolved assets still require strict held-out improvement.
 - **Governed source evolution** — V0.3 can patch only pre-registered local Git sources, in generated isolated worktrees, under allow/deny and size policies.
+- **Causally bound acceptance** — the generic Core Driver is fail-closed before held-out scoring until a source-specific runtime binding proves the candidate runtime is what the held-out tasks execute.
 - **No proposal shell** — repository identity and Gate profiles come from trusted registries; proposal data cannot become executable configuration.
 - **Authoritative accepted Git ref** — `refs/wikiskill/<source_id>/accepted` preserves accepted source provenance and reachability.
 - **Backward compatible** — legacy proposals without `target` still behave as skill proposals; V0.2 Skill/Prompt/Harness behavior remains covered by regression tests.

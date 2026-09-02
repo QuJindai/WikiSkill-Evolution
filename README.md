@@ -65,10 +65,19 @@ paths, policy precedence, and safety boundaries.
 
 ## V0.3: governed Git source evolution
 
-V0.3 makes `core` executable without turning proposals into arbitrary code
-runners. Operators pre-register a local Git source plus immutable path and Gate
-policy; the Evolution Proposer may then submit a bounded text patch against the
-current accepted SHA.
+V0.3 makes governed `core` **source mutation and engineering validation**
+executable without turning proposals into arbitrary code runners. Operators
+pre-register a local Git source plus immutable path and Gate policy; the
+Evolution Proposer may then submit a bounded text patch against the current
+accepted SHA.
+
+A final review found an essential causal boundary: the generic Git Source
+Adapter does not itself make the held-out agent execute the candidate runtime.
+Its built-in `CoreDriver` is therefore intentionally `candidate_runtime_bound =
+False` and fails closed after engineering gates. It cannot advance the accepted
+source ref or `R_best` until a source-specific runtime binding proves that
+held-out validation is actually running the candidate. This prevents stochastic
+model variation from accepting source code that was never active.
 
 ```text
 trusted Source Registry -> bounded Core proposal -> isolated Git worktree
