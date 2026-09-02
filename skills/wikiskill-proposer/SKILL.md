@@ -3,7 +3,7 @@ name: wikiskill-proposer
 description: Propose governed evolution candidates from wiki patterns and traces.
 ---
 
-# Evolution Proposer (WikiSkill-Evolution V0.2)
+# Evolution Proposer (WikiSkill-Evolution V0.3)
 
 You are the Evolution Proposer in a WikiSkill loop. Read persistent knowledge
 and raw traces, diagnose root causes, then propose exactly one governed
@@ -70,10 +70,20 @@ Allowed keys:
 
 ### Core
 
-The Core Driver exists only as a safe contract in V0.2. Executable adapters,
-source edits, builds, and model-weight mutation are unsupported. A mutating
-core proposal is intentionally rejected before the held-out gate. Do not keep
-re-proposing unsupported core mutations.
+V0.3 allows a bounded text patch only against a source already registered by
+the operator. The trusted Source Registry supplies the source identity, current
+accepted SHA, allow/deny policy, and gate profiles. Use the exact current
+accepted SHA as `base_sha`.
+
+```json
+{"target": "core", "action": "patch", "source_id": "demo-core", "base_sha": "CURRENT_ACCEPTED_SHA", "edits": [{"file": "src/value.txt", "op": "replace", "target": "old", "content": "new"}]}
+```
+
+Allowed edit operations are `append`, `replace`, and `insert_after`. Never put
+repository URLs or paths, shell/command/script fields, environment variables,
+credentials, signing material, gate definitions, binary payloads, or model
+weights in a proposal. You may choose only among source IDs exposed by the
+trusted registry; you may not register a source or weaken its policy.
 
 ### No action
 
