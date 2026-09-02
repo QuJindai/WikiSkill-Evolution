@@ -1,0 +1,66 @@
+name: Fix V0.3 runtime binding GREEN
+
+on:
+  push:
+    branches: [feature/v0.3-git-source-adapter]
+
+permissions:
+  contents: write
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v0.3-git-source-adapter
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply minimal fail-closed runtime-binding fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          assets = Path('wikiskill/assets.py')
+          text = assets.read_text()
+          old = 'class CoreDriver(GitAssetDriver):\n    target = "core"\n'
+          new = 'class CoreDriver(GitAssetDriver):\n    target = "core"\n    candidate_runtime_bound = False\n'
+          if old not in text:
+              raise SystemExit('assets CoreDriver anchor not found')
+          assets.write_text(text.replace(old, new, 1))
+
+          contract = Path('tests/test_v03_contract.py')
+          text = contract.read_text()
+          old = 'class FakeCoreDriver:\n    target = "core"\n'
+          new = 'class FakeCoreDriver:\n    target = "core"\n    candidate_runtime_bound = True\n'
+          if old not in text:
+              raise SystemExit('FakeCoreDriver anchor not found')
+          contract.write_text(text.replace(old, new, 1))
+
+          harness = Path('wikiskill/harness.py')
+          text = harness.read_text()
+          anchor = '''        gatek = gating.run_gate(\n            ws,\n            val,\n            k,\n            model=model,\n            runner=runner,\n            dry_run=dry_run,\n            overwrite=True,\n            max_turns=max_turns,\n        )\n'''
+          block = '''        if target == "core" and not getattr(\n            driver, "candidate_runtime_bound", False\n        ):\n            try:\n                cleanup = _driver_rollback(driver, target, ws, context)\n            except core_adapter.CoreOperationalError as exc:\n                engineering = _engineering_evidence(\n                    proposal,\n                    context,\n                    pre_gates,\n                    cleanup={"removed": False, "error": str(exc)},\n                )\n                _record_outcome(\n                    ws,\n                    state,\n                    k,\n                    train_mean,\n                    proposal,\n                    desc,\n                    diff,\n                    status="operational_error",\n                    accepted=False,\n                    r_val=None,\n                    prev_best=state["r_best"],\n                    error=str(exc),\n                    engineering=engineering,\n                )\n                continue\n            error = (\n                "core candidate runtime binding is not configured; held-out "\n                "validation would execute the current runtime instead of the "\n                "candidate runtime"\n            )\n            engineering = _engineering_evidence(\n                proposal, context, pre_gates, cleanup=cleanup\n            )\n            _record_outcome(\n                ws,\n                state,\n                k,\n                train_mean,\n                proposal,\n                desc,\n                diff,\n                status="operational_error",\n                accepted=False,\n                r_val=None,\n                prev_best=state["r_best"],\n                error=error,\n                engineering=engineering,\n            )\n            continue\n\n''' + anchor
+          if anchor not in text:
+              raise SystemExit('held-out gate anchor not found')
+          harness.write_text(text.replace(anchor, block, 1))
+          PY
+      - name: Verify focused GREEN and lint
+        shell: bash
+        run: |
+          python -m pip install -e . pytest pyflakes
+          python -m pyflakes wikiskill/ tests/
+          python -m pytest tests/test_v03_core_runtime_binding.py tests/test_v03_contract.py tests/test_assets.py tests/test_v02_safety.py -q
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/v03-runtime-binding-green.yml
+          git config user.email 'wikiskill@local'
+          git config user.name 'wikiskill-evolution'
+          git add wikiskill/assets.py wikiskill/harness.py tests/test_v03_contract.py .github/workflows/v03-runtime-binding-green.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: prevent unbound core held-out acceptance'
+          git push origin HEAD:feature/v0.3-git-source-adapter
