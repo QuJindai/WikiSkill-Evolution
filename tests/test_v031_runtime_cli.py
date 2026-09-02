@@ -190,8 +190,9 @@ def test_run_task_cli_uses_active_runtime_and_closes_it(monkeypatch, tmp_path):
     events = []
 
     class FakeBound:
-        runner = fake_runner
-        evidence = evidence
+        def __init__(self):
+            self.runner = fake_runner
+            self.evidence = evidence
 
         def close(self):
             events.append("close")
