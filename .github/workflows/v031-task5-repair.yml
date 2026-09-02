@@ -1,14 +1,15 @@
-name: Repair V0.3.1 Task 5 GREEN
+name: Repair V0.3.1 Task 5
 
 on:
   push:
-    branches: [feature/v0.3.1-runtime-binding]
+    branches:
+      - feature/v0.3.1-runtime-binding
 
 permissions:
   contents: write
 
 jobs:
-  repair:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,103 +19,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Apply Task 5 harness implementation
-        run: python scripts/v031_task5_green.py
-      - name: Upgrade obsolete V0.3 fake-binding contract
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('tests/test_v03_contract.py')
-          text = path.read_text()
-          old = '''def test_core_strict_improvement_accepts_after_pre_gates(monkeypatch, tmp_path):
-    ws = _workspace(tmp_path)
-    _wire_proposal(monkeypatch)
-    runner = TaskRunner(val_pass={0: set(), 1: {"val-one"}})
-    driver = FakeCoreDriver()
-    real_resolve = assets.resolve_driver
-    monkeypatch.setattr(assets, "resolve_driver",
-                        lambda target: driver if target == "core" else real_resolve(target))
-
-    state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
-    item = state["history"][-1]
-    assert item["status"] == "accepted"
-    assert item["accepted"] is True
-    assert item["engineering"]["gates"][-1]["status"] == "not_configured"
-    assert driver.events == ["validate", "prepare", "apply", "diff", "pre_gates", "accept"]
-    assert state["r_best"] == 1.0
-'''
-          new = '''def test_core_fake_binding_flag_cannot_bypass_runtime_evidence(monkeypatch, tmp_path):
-    ws = _workspace(tmp_path)
-    _wire_proposal(monkeypatch)
-    runner = TaskRunner(val_pass={0: set(), 1: {"val-one"}})
-    driver = FakeCoreDriver()
-    real_resolve = assets.resolve_driver
-    monkeypatch.setattr(assets, "resolve_driver",
-                        lambda target: driver if target == "core" else real_resolve(target))
-
-    state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
-    item = state["history"][-1]
-    assert item["status"] == "operational_error"
-    assert item["accepted"] is False
-    assert item["r_val"] is None
-    assert "candidate runtime" in item["error"].lower()
-    assert item["engineering"]["gates"][-1]["status"] == "not_configured"
-    assert not any("iter-01/val/" in tag for tag in runner.calls)
-    assert driver.events[-1] == "rollback"
-    assert "accept" not in driver.events
-    assert state["r_best"] == 0.0
-'''
-          if old not in text:
-              raise SystemExit('legacy V0.3 acceptance test anchor not found')
-          path.write_text(text.replace(old, new, 1))
-          PY
-      - name: Verify Task 5 focused causal and compatibility suite
-        shell: bash
+      - name: Apply production implementation and contract repair
+        run: python scripts/v031_task5_repair.py
+      - name: Verify focused causal and compatibility suite
         run: |
           python -m pip install -e . pytest pyflakes
           python -m py_compile wikiskill/harness.py wikiskill/prompts.py
-          set -o pipefail
-          python -m pytest \
-            tests/test_v031_runtime_integration.py \
-            tests/test_v031_core_sealing.py \
-            tests/test_runtime_bindings.py \
-            tests/test_v03_contract.py \
-            tests/test_v03_core_runtime_binding.py \
-            tests/test_harness.py \
-            tests/test_v02_safety.py -q | tee /tmp/task5-green.txt
+          python -m pytest tests/test_v031_runtime_integration.py tests/test_v031_core_sealing.py tests/test_runtime_bindings.py tests/test_v03_contract.py tests/test_v03_core_runtime_binding.py tests/test_harness.py tests/test_v02_safety.py -q
           python -m pyflakes wikiskill/harness.py wikiskill/prompts.py tests/test_v031_runtime_integration.py tests/test_v03_contract.py
-      - name: Commit real GREEN code and clean staging artifacts
-        shell: bash
+      - name: Commit verified Task 5 implementation
         run: |
-          mkdir -p docs/superpowers/plans
-          {
-            echo '# V0.3.1 Task 5 GREEN'
-            echo
-            echo '```text'
-            cat /tmp/task5-green.txt
-            echo '```'
-          } > docs/superpowers/plans/2026-09-02-v0.3.1-task5-green.md
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('docs/superpowers/plans/2026-09-02-v0.3.1-execution-log.md')
-          text = path.read_text()
-          lines = [
-              '- Task 5 RED `bff9ced7406debe4b7c17aeea2f53e5c58e4718f`: real-Git/runtime integration suite added; 7 expected lifecycle failures and legacy no-active-runtime PASS.\n',
-              '- Task 5 diagnostic `9987cb0ff9b57a461ab0fec0a5135a3f156775ba`: new V0.3.1 runtime suite 8/8 PASS; 50/51 focused tests PASS; only obsolete V0.3 fake-binding acceptance contract failed, pyflakes clean.\n',
-          ]
-          for line in lines:
-              marker = line.split(':', 1)[0]
-              if marker not in text:
-                  text += line
-          path.write_text(text)
-          PY
-          rm -f \
-            scripts/v031_task5_green.py \
-            .github/workflows/v031-task5-green.yml \
-            .github/workflows/v031-task5-repair.yml
-          git config user.email 'wikiskill@local'
-          git config user.name 'wikiskill-evolution'
+          rm -f scripts/v031_task5_green.py scripts/v031_task5_repair.py .github/workflows/v031-task5-green.yml .github/workflows/v031-task5-repair.yml
+          git config user.email wikiskill@local
+          git config user.name wikiskill-evolution
           git add -A
-          git commit -m 'feat: score core candidates through bound runtimes'
+          git commit -m "feat: score core candidates through bound runtimes"
           git push origin HEAD:feature/v0.3.1-runtime-binding
