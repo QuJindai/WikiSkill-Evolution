@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 
 from . import agents, assets, prompts, scoring, traces
 
@@ -32,9 +33,23 @@ def load_state(ws: str) -> dict:
 
 
 def save_state(ws: str, state: dict) -> None:
-    os.makedirs(os.path.dirname(state_path(ws)), exist_ok=True)
-    with open(state_path(ws), "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    path = state_path(ws)
+    parent = os.path.dirname(path)
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix=os.path.basename(path) + ".tmp-", dir=parent, text=True
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------- legacy skill wrappers
@@ -74,6 +89,28 @@ def accept_commit(ws: str, k: int, r_val: float) -> None:
 
 # ---------------------------------------------------------------- run helpers
 
+RUNTIME_EVIDENCE_KEYS = (
+    "source_id", "source_sha", "binding_profile", "fingerprint"
+)
+
+
+def _bounded_runtime_evidence(value: dict | None) -> dict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("runtime evidence must be an object")
+    missing = [key for key in RUNTIME_EVIDENCE_KEYS if key not in value]
+    if missing:
+        raise ValueError(f"runtime evidence missing keys: {missing}")
+    out = {}
+    for key in RUNTIME_EVIDENCE_KEYS:
+        item = value[key]
+        if not isinstance(item, str) or not item:
+            raise ValueError(f"runtime evidence {key} must be non-empty text")
+        out[key] = item
+    return out
+
+
 def _session_had_no_tool_calls(session_jsonl: str) -> bool:
     """True when the exported session performed zero tool calls (launch failure)."""
     try:
@@ -86,7 +123,8 @@ def _session_had_no_tool_calls(session_jsonl: str) -> bool:
 
 def run_task(ws: str, task: dict, it: int, *, model: str | None = None,
              runner=agents.run_agent, dry_run: bool = False,
-             overwrite: bool = False, max_turns: int | None = None) -> dict:
+             overwrite: bool = False, max_turns: int | None = None,
+             runtime_evidence: dict | None = None) -> dict:
     """Inference rollout on one task + grading + trace capture.
 
     Explicit max_turns wins; otherwise the active harness policy wins; otherwise
@@ -114,6 +152,9 @@ def run_task(ws: str, task: dict, it: int, *, model: str | None = None,
         "title": task["title"], "score": score, "model": model,
         "exit_code": res.get("exit_code"), "duration_s": res.get("duration_s"),
     }
+    bounded_runtime = _bounded_runtime_evidence(runtime_evidence)
+    if bounded_runtime is not None:
+        meta["runtime"] = bounded_runtime
     traces.save_trace(ws, it, task["split"], task["id"], meta,
                       transcript_src=res.get("session_file"),
                       overwrite=overwrite or bool(dry_run))
@@ -129,9 +170,17 @@ def mean_score(results: list[dict]) -> float:
 
 def run_gate(ws: str, tasks: list[dict], it: int, *, model: str | None = None,
              runner=agents.run_agent, dry_run: bool = False,
-             overwrite: bool = False, max_turns: int | None = None) -> dict:
+             overwrite: bool = False, max_turns: int | None = None,
+             runtime_evidence: dict | None = None) -> dict:
     """Validation rollout over a task split with the current active assets."""
-    results = [run_task(ws, t, it, model=model, runner=runner, dry_run=dry_run,
-                        overwrite=overwrite, max_turns=max_turns)
-               for t in tasks]
+    common = {
+        "model": model,
+        "runner": runner,
+        "dry_run": dry_run,
+        "overwrite": overwrite,
+        "max_turns": max_turns,
+    }
+    if runtime_evidence is not None:
+        common["runtime_evidence"] = runtime_evidence
+    results = [run_task(ws, t, it, **common) for t in tasks]
     return {"iter": it, "results": results, "mean": mean_score(results)}

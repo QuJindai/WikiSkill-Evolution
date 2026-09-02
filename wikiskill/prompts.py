@@ -126,7 +126,10 @@ Rules:
    allow/deny policy, gate profiles, and accepted-ref authority come only from the
    trusted registry. Never put repository URLs/paths, shell/command/script fields,
    environment variables, credentials, or gate definitions in a proposal.
-6. Write exactly one JSON object to:
+6. Runtime binding is trusted operator-controlled state. A proposal MUST NOT
+   include binding_profile, runtime profile/entrypoint/argv/timeout/environment,
+   device routing, or any other runtime execution control.
+7. Write exactly one JSON object to:
    {os.path.join(ws, 'runs', 'proposals', f'iter-{it:02d}.json')}
 
 Proposal schemas:
@@ -152,7 +155,8 @@ Core source patch (registered source only):
 Allowed core edit operations are append, replace, and insert_after. The source_id
 and base_sha must match the trusted registry summary above. The proposer cannot
 change repository identity, source policy, shell commands, gate definitions, or
-credentials.
+credentials. It also cannot choose a runtime binding_profile or any runtime
+execution setting; those are trusted operator-controlled state.
 
 No action:
 {{"action": "no_action"}}
