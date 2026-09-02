@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 
-from . import assets
+from . import assets, sources
 
 INFERENCE_PREFIX = (
     "You are an agent completing a task in a sandbox directory. "
@@ -91,6 +91,7 @@ Procedure:
 
 def proposer_prompt(ws: str, it: int, train_results: list[dict]) -> str:
     wiki = os.path.join(ws, "wiki")
+    source_summary = sources.proposer_source_summary(ws)
     rows = []
     for r in sorted(train_results, key=lambda x: (x.get("score") or 0, x["id"])):
         rows.append(f"- {r['id']} [{r['split']}] score={r.get('score')}: {r['title']}")
@@ -105,6 +106,8 @@ WORKSPACE: {ws}
 - Active skills: {os.path.join(ws, 'skills', 'active')}/
 - Prompt assets: {os.path.join(ws, 'assets', 'prompts', 'active')}/
 - Harness assets: {os.path.join(ws, 'assets', 'harness', 'active')}/
+- Registered core sources (trusted registry):
+{source_summary}
 
 Training rollout summary this iteration:
 {table}
@@ -116,9 +119,13 @@ Rules:
    proposing a mutation.
 3. Choose exactly one target: skill, prompt, harness, core, or no_action.
 4. The harness validates structure, applies the candidate through its Asset
-   Driver, runs the same held-out gate, and accepts only if R_val > R_best.
-5. Core mutation is unsupported in V0.2. Do not propose executable core
-   changes; use no_action instead when only a core mutation would help.
+   Driver, runs trusted engineering gates for core candidates, then the same
+   held-out gate, and accepts only if R_val > R_best.
+5. Core mutation is allowed only for a source_id listed in the trusted registry.
+   Use that source's current accepted_sha exactly as base_sha. Repository identity,
+   allow/deny policy, gate profiles, and accepted-ref authority come only from the
+   trusted registry. Never put repository URLs/paths, shell/command/script fields,
+   environment variables, credentials, or gate definitions in a proposal.
 6. Write exactly one JSON object to:
    {os.path.join(ws, 'runs', 'proposals', f'iter-{it:02d}.json')}
 
@@ -140,10 +147,12 @@ Harness policy (declarative only):
 Allowed policy keys: inference_max_turns, maintainer_max_turns,
 proposer_max_turns, maintainer_run_budget, proposer_run_budget.
 
-Core contract:
-{{"target": "core", "action": "patch", "name": "runtime", "manifest": {{"adapter": "none"}}}}
-Core adapter mutation is unsupported in V0.2 and will be recorded as invalid
-without running a validation rollout.
+Core source patch (registered source only):
+{{"target": "core", "action": "patch", "source_id": "demo-core", "base_sha": "CURRENT_ACCEPTED_SHA", "edits": [{{"file": "src/value.txt", "op": "replace", "target": "old", "content": "new"}}]}}
+Allowed core edit operations are append, replace, and insert_after. The source_id
+and base_sha must match the trusted registry summary above. The proposer cannot
+change repository identity, source policy, shell commands, gate definitions, or
+credentials.
 
 No action:
 {{"action": "no_action"}}
