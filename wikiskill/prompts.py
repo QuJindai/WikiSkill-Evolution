@@ -210,6 +210,8 @@ def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
         body += ["", "Validation: structural validation failed; no held-out rollout performed."]
     elif effective == "operational_error":
         body += ["", "Validation: operational failure; accepted source state and R_best were not advanced."]
+    elif effective == "recovery_required":
+        body += ["", "Validation: recovery is required because source and scoring state could not be proven consistent; no acceptance is claimed."]
     elif effective == "rejected" and r_val is None:
         body += ["", "Validation: engineering gate rejected the candidate before held-out rollout."]
     elif accepted:
