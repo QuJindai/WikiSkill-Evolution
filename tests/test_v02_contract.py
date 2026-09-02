@@ -1,4 +1,4 @@
-"""Release-contract tests for WikiSkill-Evolution V0.2."""
+"""Release-contract tests for WikiSkill-Evolution V0.2 compatibility."""
 
 from wikiskill import bench, cli, harness, prompts, tasks as tasks_mod
 
@@ -20,7 +20,8 @@ def test_proposer_prompt_exposes_all_v02_asset_targets(tmp_path):
         assert token in text
     assert 'name": "inference"' in text
     assert "inference_max_turns" in text
-    assert "core" in text.lower() and "unsupported" in text.lower()
+    assert "trusted registry" in text.lower()
+    assert '"source_id"' in text and '"base_sha"' in text
 
 
 def test_cli_evolve_default_does_not_override_harness_policy(tmp_path, monkeypatch):
