@@ -2,7 +2,6 @@
 
 import os
 
-import pytest
 
 from wikiskill import assets, core_adapter, gating, harness, prompts
 from wikiskill import tasks as tasks_mod, wiki
