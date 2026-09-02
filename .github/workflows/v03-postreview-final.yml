@@ -2,7 +2,8 @@ name: Finalize V0.3 post-review boundary
 
 on:
   push:
-    branches: [feature/v0.3-git-source-adapter]
+    branches:
+      - feature/v0.3-git-source-adapter
 
 permissions:
   contents: write
@@ -18,101 +19,34 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Correct V0.3 runtime-binding documentation
+      - name: Correct runtime-binding documentation
+        run: python scripts/v03_postreview_finalize.py patch
+      - name: Install dependencies
+        run: python -m pip install -e . pytest pyflakes
+      - name: Focused security and runtime-binding suite
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          readme = Path('README.md')
-          text = readme.read_text()
-          old = '''V0.3 makes `core` executable without turning proposals into arbitrary code
-runners. Operators pre-register a local Git source plus immutable path and Gate
-policy; the Evolution Proposer may then submit a bounded text patch against the
-current accepted SHA.
-'''
-          new = '''V0.3 makes governed `core` **source mutation and engineering validation**
-executable without turning proposals into arbitrary code runners. Operators
-pre-register a local Git source plus immutable path and Gate policy; the
-Evolution Proposer may then submit a bounded text patch against the current
-accepted SHA.
-
-A final review found an essential causal boundary: the generic Git Source
-Adapter does not itself make the held-out agent execute the candidate runtime.
-Its built-in `CoreDriver` is therefore intentionally `candidate_runtime_bound =
-False` and fails closed after engineering gates. It cannot advance the accepted
-source ref or `R_best` until a source-specific runtime binding proves that
-held-out validation is actually running the candidate. This prevents stochastic
-model variation from accepting source code that was never active.
-'''
-          if old not in text:
-              raise SystemExit('README V0.3 intro anchor not found')
-          readme.write_text(text.replace(old, new, 1))
-
-          index = Path('docs/index.md')
-          text = index.read_text()
-          anchor = '- **Governed source evolution** — V0.3 can patch only pre-registered local Git sources, in generated isolated worktrees, under allow/deny and size policies.\n'
-          addition = anchor + '- **Causally bound acceptance** — the generic Core Driver is fail-closed before held-out scoring until a source-specific runtime binding proves the candidate runtime is what the held-out tasks execute.\n'
-          if anchor not in text:
-              raise SystemExit('docs/index governed source anchor not found')
-          index.write_text(text.replace(anchor, addition, 1))
-
-          doc = Path('docs/V0.3-GIT-SOURCE-ADAPTER.md')
-          text = doc.read_text()
-          anchor = '## Acceptance and rollback\n\n'
-          note = '''## Candidate runtime binding\n\nEngineering gates prove that a candidate source patch is bounded, buildable,\nand regression-clean. They do **not** by themselves prove that WikiSkill\nheld-out tasks executed that candidate runtime.\n\nThe built-in generic `CoreDriver` therefore declares\n`candidate_runtime_bound = False`. After engineering gates pass, the harness\nrecords an `operational_error`, removes the candidate worktree, skips held-out\nscoring, and leaves both the accepted source ref and `R_best` unchanged.\n\nA source-specific Core Driver may set the binding true only when it provides an\nexecution path that actually runs the candidate runtime during held-out\nvalidation. Android/llama.cpp/device bindings remain a later-phase capability.\n\n'''
-          if anchor not in text:
-              raise SystemExit('V0.3 acceptance anchor not found')
-          doc.write_text(text.replace(anchor, note + anchor, 1))
-
-          spec = Path('docs/superpowers/specs/2026-09-01-v0.3-git-source-adapter-design.md')
-          text = spec.read_text()
-          anchor = 'Predecessor: V0.2 Asset-Driver Evolution Architecture\n\n'
-          note = '''Predecessor: V0.2 Asset-Driver Evolution Architecture\n\n> **Post-review correction — 2026-09-02:** implementation review proved that\n> the generic Git Source Adapter did not causally bind the candidate worktree to\n> the ordinary WikiSkill held-out runner. The generic `CoreDriver` now fails\n> closed with `candidate_runtime_bound = False`: engineering gates may run, but\n> no held-out score, accepted-ref advance, or `R_best` advance is permitted until\n> a source-specific runtime binding executes the candidate during held-out\n> validation. Sections describing full Core acceptance are conditional on that\n> binding and are not a claim that the generic V0.3 driver provides it.\n\n'''
-          if anchor not in text:
-              raise SystemExit('spec header anchor not found')
-          spec.write_text(text.replace(anchor, note, 1))
-          PY
-      - name: Run final focused security, lint, and full tests
-        shell: bash
-        run: |
-          python -m pip install -e . pytest pyflakes
           set -o pipefail
           python -m pytest tests/test_sources.py tests/test_core_adapter.py tests/test_v03_contract.py tests/test_v03_core_runtime_binding.py -q | tee /tmp/security.txt
-          python -m pyflakes wikiskill/ tests/ | tee /tmp/pyflakes.txt
-          python -m pytest tests/ -q | tee /tmp/full.txt
-          head_sha=$(git rev-parse HEAD)
-          mkdir -p docs/superpowers/plans
-          {
-            echo '# V0.3 Post-review Final Verification'
-            echo
-            echo "verified_head=$head_sha"
-            echo 'security_exit_code=0'
-            echo 'pyflakes_exit_code=0'
-            echo 'full_pytest_exit_code=0'
-            echo
-            echo '## Focused security + runtime-binding suite'
-            echo '```text'
-            cat /tmp/security.txt
-            echo '```'
-            echo
-            echo '## Pyflakes'
-            echo '```text'
-            cat /tmp/pyflakes.txt
-            echo '```'
-            echo
-            echo '## Full pytest'
-            echo '```text'
-            cat /tmp/full.txt
-            echo '```'
-          } > docs/superpowers/plans/2026-09-02-v0.3-postreview-final-verification.md
-      - name: Commit docs, evidence, and remove temporary workflow
+      - name: Pyflakes
         shell: bash
         run: |
-          rm -f .github/workflows/v03-postreview-final.yml
-          git config user.email 'wikiskill@local'
-          git config user.name 'wikiskill-evolution'
-          git add README.md docs/index.md docs/V0.3-GIT-SOURCE-ADAPTER.md docs/superpowers/specs/2026-09-01-v0.3-git-source-adapter-design.md docs/superpowers/plans/2026-09-02-v0.3-postreview-final-verification.md .github/workflows/v03-postreview-final.yml
+          set -o pipefail
+          python -m pyflakes wikiskill/ tests/ | tee /tmp/pyflakes.txt
+      - name: Full pytest
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -q | tee /tmp/full.txt
+      - name: Write evidence
+        run: python scripts/v03_postreview_finalize.py evidence
+      - name: Commit verified docs and remove temporary files
+        shell: bash
+        run: |
+          rm -f .github/workflows/v03-postreview-final.yml scripts/v03_postreview_finalize.py
+          git config user.email wikiskill@local
+          git config user.name wikiskill-evolution
+          git add -A README.md docs .github/workflows/v03-postreview-final.yml scripts/v03_postreview_finalize.py
           git diff --cached --quiet && exit 0
           git commit -m 'docs: document core runtime-binding safety boundary'
           git push origin HEAD:feature/v0.3-git-source-adapter
