@@ -1,0 +1,46 @@
+name: Verify V0.3.1 Task 2 GREEN
+
+on:
+  push:
+    branches: [feature/v0.3.1-runtime-binding]
+
+permissions:
+  contents: write
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v0.3.1-runtime-binding
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply Task 2 implementation
+        run: python scripts/v031_task2_green.py
+      - name: Verify focused lifecycle and regressions
+        shell: bash
+        run: |
+          python -m pip install -e . pytest pyflakes
+          python -m py_compile wikiskill/core_adapter.py wikiskill/assets.py
+          python -m pytest tests/test_v031_core_sealing.py tests/test_core_adapter.py tests/test_sources.py -q | tee /tmp/green.txt
+          python -m pyflakes wikiskill/core_adapter.py wikiskill/assets.py tests/test_v031_core_sealing.py
+      - name: Commit GREEN and cleanup staging files
+        shell: bash
+        run: |
+          mkdir -p docs/superpowers/plans
+          {
+            echo '# V0.3.1 Task 2 GREEN'
+            echo
+            echo '```text'
+            cat /tmp/green.txt
+            echo '```'
+          } > docs/superpowers/plans/2026-09-02-v0.3.1-task2-green.md
+          rm -f scripts/v031_task2_green.py .github/workflows/v031-task2-green.yml
+          git config user.email 'wikiskill@local'
+          git config user.name 'wikiskill-evolution'
+          git add wikiskill/core_adapter.py wikiskill/assets.py tests/test_v031_core_sealing.py docs/superpowers/plans/2026-09-02-v0.3.1-task2-green.md scripts/v031_task2_green.py .github/workflows/v031-task2-green.yml
+          git commit -m 'feat: seal core candidates before runtime binding'
+          git push origin HEAD:feature/v0.3.1-runtime-binding
