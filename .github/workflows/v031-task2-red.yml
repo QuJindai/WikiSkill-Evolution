@@ -1,0 +1,63 @@
+name: Verify V0.3.1 Task 2 RED
+
+on:
+  push:
+    branches: [feature/v0.3.1-runtime-binding]
+
+permissions:
+  contents: write
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v0.3.1-runtime-binding
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Correct plan cleanup ownership
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('docs/superpowers/plans/2026-09-02-v0.3.1-runtime-binding-implementation.md')
+          text = path.read_text()
+          old = '`advance_accepted_candidate()` requires sealed SHA, verifies candidate worktree is already closed/removed, calls `sources.advance_accepted_sha(ws, source_id, base_sha, candidate_sha, iteration)`, and intentionally leaves candidate ref.'
+          new = '`advance_accepted_candidate()` requires sealed SHA, removes/prunes the candidate worktree successfully first, then calls `sources.advance_accepted_sha(ws, source_id, base_sha, candidate_sha, iteration)`, and intentionally leaves candidate ref.'
+          if old not in text:
+              raise SystemExit('plan cleanup anchor not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Confirm missing seal API RED
+        shell: bash
+        run: |
+          python -m pip install -e . pytest pyflakes
+          set +e
+          python -m pytest tests/test_v031_core_sealing.py -q > /tmp/red.txt 2>&1
+          code=$?
+          set -e
+          cat /tmp/red.txt
+          test "$code" -ne 0
+          grep -Eq "seal_candidate|advance_accepted_candidate" /tmp/red.txt
+      - name: Record RED evidence and remove workflow
+        shell: bash
+        run: |
+          mkdir -p docs/superpowers/plans
+          {
+            echo '# V0.3.1 Task 2 RED'
+            echo
+            echo 'Expected failure: candidate seal/source-transition APIs are absent.'
+            echo
+            echo '```text'
+            cat /tmp/red.txt
+            echo '```'
+          } > docs/superpowers/plans/2026-09-02-v0.3.1-task2-red.md
+          rm -f .github/workflows/v031-task2-red.yml
+          git config user.email 'wikiskill@local'
+          git config user.name 'wikiskill-evolution'
+          git add tests/test_v031_core_sealing.py docs/superpowers/plans/2026-09-02-v0.3.1-runtime-binding-implementation.md docs/superpowers/plans/2026-09-02-v0.3.1-task2-red.md .github/workflows/v031-task2-red.yml
+          git commit -m 'test: record V0.3.1 Task 2 RED'
+          git push origin HEAD:feature/v0.3.1-runtime-binding
