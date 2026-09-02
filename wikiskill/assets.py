@@ -325,6 +325,26 @@ class CoreDriver(GitAssetDriver):
             raise ValueError("core pre_gates requires candidate context")
         return core_adapter.run_pre_gates(context)
 
+    def seal(self, ws: str, iteration: int, context=None):
+        if context is None:
+            raise ValueError("core seal requires candidate context")
+        return core_adapter.seal_candidate(context, iteration)
+
+    def advance_source(self, ws: str, iteration: int, context=None):
+        if context is None:
+            raise ValueError("core source transition requires candidate context")
+        return core_adapter.advance_accepted_candidate(context, iteration)
+
+    def compensate_source(self, ws: str, iteration: int, transition: dict, context=None):
+        if context is None:
+            raise ValueError("core source compensation requires candidate context")
+        return core_adapter.compensate_accepted_candidate(context, transition, iteration)
+
+    def release_candidate_ref(self, ws: str, iteration: int, context=None):
+        if context is None:
+            raise ValueError("core candidate ref release requires candidate context")
+        return core_adapter.release_candidate_ref(context, iteration)
+
     def accept(self, ws: str, iteration: int, score: float, context=None):
         if context is None:
             raise ValueError("core accept requires candidate context")
