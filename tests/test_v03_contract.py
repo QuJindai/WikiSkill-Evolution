@@ -206,7 +206,7 @@ def test_core_operational_error_is_not_learned_as_rejection(monkeypatch, tmp_pat
     assert "runner unavailable" in impact
 
 
-def test_core_strict_improvement_accepts_after_pre_gates(monkeypatch, tmp_path):
+def test_core_fake_binding_flag_cannot_bypass_runtime_evidence(monkeypatch, tmp_path):
     ws = _workspace(tmp_path)
     _wire_proposal(monkeypatch)
     runner = TaskRunner(val_pass={0: set(), 1: {"val-one"}})
@@ -217,11 +217,15 @@ def test_core_strict_improvement_accepts_after_pre_gates(monkeypatch, tmp_path):
 
     state = harness.evolve(ws, iters=1, runner=runner, verbose=False)
     item = state["history"][-1]
-    assert item["status"] == "accepted"
-    assert item["accepted"] is True
+    assert item["status"] == "operational_error"
+    assert item["accepted"] is False
+    assert item["r_val"] is None
+    assert "candidate runtime" in item["error"].lower()
     assert item["engineering"]["gates"][-1]["status"] == "not_configured"
-    assert driver.events == ["validate", "prepare", "apply", "diff", "pre_gates", "accept"]
-    assert state["r_best"] == 1.0
+    assert not any("iter-01/val/" in tag for tag in runner.calls)
+    assert driver.events[-1] == "rollback"
+    assert "accept" not in driver.events
+    assert state["r_best"] == 0.0
 
 
 def test_engineering_audit_block_is_rendered(tmp_path):

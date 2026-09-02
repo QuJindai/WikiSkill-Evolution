@@ -7,7 +7,10 @@ import json
 import os
 import sys
 
-from . import agents, backends, bench, compare, gating, harness, sources, tasks as tasks_mod, traces, transfer
+from . import (
+    agents, backends, bench, compare, gating, harness, runtime_bindings, sources,
+    tasks as tasks_mod, traces, transfer,
+)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_WS_ROOT = os.path.join(REPO_ROOT, "workspaces")
@@ -135,15 +138,29 @@ def cmd_run_task(args) -> int:
     if not t:
         print(f"unknown task: {args.task_id}")
         return 1
-    r = gating.run_task(ws, t, args.iter, model=args.model, dry_run=args.dry_run,
-                        max_turns=args.max_turns,
-                        runner=lambda *a, **k: agents.run_agent(
-                            *a, **k, run_budget=args.run_budget))
+
+    bound = runtime_bindings.bind_active_accepted(ws)
+    if bound is not None:
+        try:
+            r = gating.run_task(
+                ws, t, args.iter, model=args.model, dry_run=args.dry_run,
+                max_turns=args.max_turns, runner=bound.runner,
+                runtime_evidence=bound.evidence,
+            )
+        finally:
+            bound.close()
+    else:
+        r = gating.run_task(
+            ws, t, args.iter, model=args.model, dry_run=args.dry_run,
+            max_turns=args.max_turns,
+            runner=lambda *a, **k: agents.run_agent(
+                *a, **k, run_budget=args.run_budget
+            ),
+        )
     print(f"task {t['id']}: score={r.get('score')}")
     if r.get("result", {}).get("cmd") and args.dry_run:
         print("cmd: " + " ".join(r["result"]["cmd"]))
     return 0
-
 
 def cmd_maintain(args) -> int:
     ws = resolve_ws(args.domain, args.ws)
@@ -220,6 +237,44 @@ def cmd_source_validate(args) -> int:
         f"{result['status']}: {result['source_id']} "
         f"accepted_sha={result['accepted_sha']}"
     )
+    return 0
+
+
+def _runtime_ws(args) -> str:
+    return os.path.abspath(args.ws) if args.ws else os.getcwd()
+
+
+def cmd_runtime_bind(args) -> int:
+    ws = _runtime_ws(args)
+    result = runtime_bindings.bind_source(ws, args.source_id, args.binding_profile)
+    print(
+        f"runtime bound: {result['source_id']} "
+        f"profile={result['binding_profile']} role={result['role']}"
+    )
+    return 0
+
+
+def cmd_runtime_activate(args) -> int:
+    ws = _runtime_ws(args)
+    result = runtime_bindings.activate_source(ws, args.source_id)
+    print(
+        f"runtime active: {result['source_id']} "
+        f"profile={result['binding_profile']} accepted_sha={result['accepted_sha']} "
+        f"fingerprint={result['fingerprint']}"
+    )
+    return 0
+
+
+def cmd_runtime_inspect(args) -> int:
+    ws = _runtime_ws(args)
+    print(json.dumps(runtime_bindings.inspect_runtime(ws), indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_runtime_validate(args) -> int:
+    ws = _runtime_ws(args)
+    result = runtime_bindings.validate_runtime(ws)
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
@@ -324,6 +379,28 @@ def main(argv: list[str] | None = None) -> int:
     source_sp.add_argument("source_id")
     source_sp.add_argument("--ws", help="workspace path (default: current directory)")
     source_sp.set_defaults(fn=cmd_source_validate)
+
+    sp = sub.add_parser("runtime", help="trusted inference runtime operations")
+    runtime_sub = sp.add_subparsers(dest="runtime_cmd", required=True)
+
+    runtime_sp = runtime_sub.add_parser("bind", help="bind a source to a trusted runtime profile")
+    runtime_sp.add_argument("source_id")
+    runtime_sp.add_argument("binding_profile")
+    runtime_sp.add_argument("--ws", help="workspace path (default: current directory)")
+    runtime_sp.set_defaults(fn=cmd_runtime_bind)
+
+    runtime_sp = runtime_sub.add_parser("activate", help="activate a bound inference source")
+    runtime_sp.add_argument("source_id")
+    runtime_sp.add_argument("--ws", help="workspace path (default: current directory)")
+    runtime_sp.set_defaults(fn=cmd_runtime_activate)
+
+    runtime_sp = runtime_sub.add_parser("inspect", help="inspect trusted runtime state")
+    runtime_sp.add_argument("--ws", help="workspace path (default: current directory)")
+    runtime_sp.set_defaults(fn=cmd_runtime_inspect)
+
+    runtime_sp = runtime_sub.add_parser("validate", help="validate trusted runtime state")
+    runtime_sp.add_argument("--ws", help="workspace path (default: current directory)")
+    runtime_sp.set_defaults(fn=cmd_runtime_validate)
 
     sp = sub.add_parser("reset", help="clear raw/runs and roll skills back")
     add_ws(sp); sp.set_defaults(fn=cmd_reset)
