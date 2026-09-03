@@ -63,6 +63,73 @@ proposals without a `target` still behave as `target="skill"`.
 See [V0.2 Asset Drivers](docs/V0.2-ASSET-DRIVERS.md) for schemas, workspace
 paths, policy precedence, and safety boundaries.
 
+## V0.3: governed Git source evolution
+
+V0.3 makes governed `core` **source mutation and engineering validation**
+executable without turning proposals into arbitrary code runners. Operators
+pre-register a local Git source plus immutable path and Gate policy; the
+Evolution Proposer may then submit a bounded text patch against the current
+accepted SHA.
+
+The generic source adapter deliberately separated source engineering from
+runtime causality: a source patch could pass Static/Build/Regression without
+proving that held-out tasks actually executed that patch. V0.3 therefore
+established the safe source/worktree/ref boundary; V0.3.1 below closes the
+runtime-execution boundary rather than trusting a boolean binding flag.
+
+```text
+trusted Source Registry -> bounded Core proposal -> isolated Git worktree
+                        -> Static -> Build -> Regression -> optional Performance
+                        -> runtime-bound held-out Gate -> accept-ref advance / rollback
+```
+
+`refs/wikiskill/<source_id>/accepted` is the authoritative accepted source
+baseline. Repository identity, allow/deny rules, and Gate profiles are trusted
+configuration; proposals cannot supply shell commands, credentials, repository
+URLs, or Gate definitions. V0.3 remains text-only and does not install APKs,
+modify model weights, or run phone/device gates.
+
+See [V0.3 Git Source Adapter](docs/V0.3-GIT-SOURCE-ADAPTER.md) for the Source
+Manifest, Core proposal schema, worktree lifecycle, engineering gates, Source
+CLI, audit model, and source-governance boundary.
+
+## V0.3.1: trusted runtime binding
+
+V0.3.1 proves that the exact Git SHA recorded in runtime evidence is the source
+that produced each governed inference score. When an operator activates a bound
+inference source **before the initial baseline**, baseline, train, and
+Skill/Prompt/Harness held-out rollouts execute a detached worktree pinned to the
+current accepted ref SHA. Maintainer and Proposer turns remain on the framework
+backend.
+
+A Core candidate that passes engineering Gates is committed and sealed as an
+immutable SHA before capability validation. Its held-out tasks then execute the
+exact sealed candidate worktree through a trusted `BoundRuntimeSession`; there
+is no fallback to the accepted/default runner.
+
+```text
+accepted SHA A -> baseline/train/non-Core val execute A
+       ↓
+Core gates -> seal candidate SHA B -> held-out executes B
+       ↓
+R_B > R_best
+       ↓
+close B -> cleanup worktree -> CAS A→B
+       -> atomically persist R_best + runtime_identity(B)
+       -> release candidate ref -> next phase rebinds B
+```
+
+The first production profile, `registered:python-json-runner-v1`, fixes the
+entrypoint, executable, timeout, protocol, and minimal environment in trusted
+code. Proposal JSON cannot choose runtime profiles, commands, argv, environment,
+credentials, devices, or executable paths. State-write failure after source
+transition triggers B→A compensation; unresolved compensation enters
+fail-closed recovery.
+
+See [V0.3.1 Trusted Runtime Binding](docs/V0.3.1-RUNTIME-BINDING.md) for operator
+commands, exact-SHA materialization, trace identity, Python JSON protocol,
+transaction ordering, recovery behavior, and the real-Git A→B causal proof.
+
 ## Why Hermes?
 
 This is not a toy simulator. Every component is a **real Hermes agent turn**:
@@ -99,8 +166,9 @@ workspaces/demo/
 │   ├── index.md  ·  log.md  ·  skill-impact.md  ·  patterns/*.md
 ├── skills/active/                                 # git-managed evolving skill set (S₀ = ∅)
 ├── skills/framework/                              # maintainer + proposer agent skills
+├── runtime/                                       # trusted runtime registration + active source
 ├── bench/tasks/<id>/                              # task sandboxes (inputs + grader)
-└── runs/                                          # per-run stdout, proposals, state
+└── runs/                                          # stdout, proposals, state, generated worktrees
 ```
 
 ## CLI
@@ -111,8 +179,18 @@ workspaces/demo/
 | `wikiskill bench --reset` | Regenerate tasks (deterministic, seed=42) |
 | `wikiskill status` | Workspace state: scores, skills, wiki, history |
 | `wikiskill evolve --iters N [--model M] [--provider P] [--max-turns N] [--no-early-stop]` | The full loop (`--model`/`--provider` patch the isolated profile's default model, e.g. `google/gemini-2.5-flash-lite` + `openrouter`) |
-| `wikiskill run-task <id>` | Single inference rollout (debug) |
+| `wikiskill run-task <id>` | Single inference rollout; uses active accepted runtime when configured |
+| `wikiskill source register <manifest> [--ws PATH]` | Register a trusted local Git source manifest |
+| `wikiskill source list [--ws PATH]` | List registered sources and accepted SHAs |
+| `wikiskill source inspect <source_id> [--ws PATH]` | Inspect trusted manifest + accepted-state mirror |
+| `wikiskill source validate <source_id> [--ws PATH]` | Revalidate repository/ref/policy/Gate registration |
+| `wikiskill runtime bind <source_id> <profile> [--ws PATH]` | Bind a registered source to a static trusted runtime profile |
+| `wikiskill runtime activate <source_id> [--ws PATH]` | Activate one inference source before the initial baseline |
+| `wikiskill runtime inspect [--ws PATH]` | Inspect bounded runtime registration/active identity |
+| `wikiskill runtime validate [--ws PATH]` | Revalidate trusted runtime state |
 | `wikiskill compare <wsA> <wsB> [--iters N]` | Paired statistical comparison: per-task win/loss/tie + two-sided exact-binomial p-value (answers "did the skill actually help?" — see [docs/COMPARING.md](docs/COMPARING.md)) |
+
+There is intentionally no generic `runtime exec` or runtime command-registration CLI.
 
 ## Bring your own tasks
 
@@ -174,6 +252,9 @@ one backend transfer to another via `wikiskill transfer` (same SKILL.md format).
 ## Roadmap
 
 **Done:**
+- [x] V0.2 governed Skill/Prompt/Harness Asset Drivers
+- [x] V0.3 governed Git Source Adapter with isolated worktrees and engineering Gates
+- [x] V0.3.1 trusted runtime binding with exact-SHA causal scoring and Core acceptance compensation
 - [x] `compare` command — paired exact-binomial run comparison ([#6](https://github.com/ashutoshsinghpr7/wikiskill/pull/6))
 - [x] Skill *transfer* across workspaces/models ([#7](https://github.com/ashutoshsinghpr7/wikiskill/pull/7))
 - [x] Cron-driven overnight evolution (`hermes cron`, 01:00 IST nightly) + docs/CRON.md
@@ -183,6 +264,8 @@ one backend transfer to another via `wikiskill transfer` (same SKILL.md format).
 - [x] Multi-iteration compounding run — honest negative documented (Run 6)
 
 **Planned:**
+- [ ] Source-specific `llama.cpp` trusted runtime profile
+- [ ] Source-specific Android/device trusted runtime profile with separately reviewed build/install/device Gates
 - [ ] Codex backend ([#15](https://github.com/ashutoshsinghpr7/wikiskill/issues/15))
 - [ ] OpenCode backend ([#16](https://github.com/ashutoshsinghpr7/wikiskill/issues/16))
 - [ ] Cross-agent transfer demo — evolve on one agent, gate on another ([#17](https://github.com/ashutoshsinghpr7/wikiskill/issues/17))

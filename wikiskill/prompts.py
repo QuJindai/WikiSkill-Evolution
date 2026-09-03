@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 
-from . import assets
+from . import assets, sources
 
 INFERENCE_PREFIX = (
     "You are an agent completing a task in a sandbox directory. "
@@ -91,6 +91,7 @@ Procedure:
 
 def proposer_prompt(ws: str, it: int, train_results: list[dict]) -> str:
     wiki = os.path.join(ws, "wiki")
+    source_summary = sources.proposer_source_summary(ws)
     rows = []
     for r in sorted(train_results, key=lambda x: (x.get("score") or 0, x["id"])):
         rows.append(f"- {r['id']} [{r['split']}] score={r.get('score')}: {r['title']}")
@@ -105,6 +106,8 @@ WORKSPACE: {ws}
 - Active skills: {os.path.join(ws, 'skills', 'active')}/
 - Prompt assets: {os.path.join(ws, 'assets', 'prompts', 'active')}/
 - Harness assets: {os.path.join(ws, 'assets', 'harness', 'active')}/
+- Registered core sources (trusted registry):
+{source_summary}
 
 Training rollout summary this iteration:
 {table}
@@ -116,10 +119,17 @@ Rules:
    proposing a mutation.
 3. Choose exactly one target: skill, prompt, harness, core, or no_action.
 4. The harness validates structure, applies the candidate through its Asset
-   Driver, runs the same held-out gate, and accepts only if R_val > R_best.
-5. Core mutation is unsupported in V0.2. Do not propose executable core
-   changes; use no_action instead when only a core mutation would help.
-6. Write exactly one JSON object to:
+   Driver, runs trusted engineering gates for core candidates, then the same
+   held-out gate, and accepts only if R_val > R_best.
+5. Core mutation is allowed only for a source_id listed in the trusted registry.
+   Use that source's current accepted_sha exactly as base_sha. Repository identity,
+   allow/deny policy, gate profiles, and accepted-ref authority come only from the
+   trusted registry. Never put repository URLs/paths, shell/command/script fields,
+   environment variables, credentials, or gate definitions in a proposal.
+6. Runtime binding is trusted operator-controlled state. A proposal MUST NOT
+   include binding_profile, runtime profile/entrypoint/argv/timeout/environment,
+   device routing, or any other runtime execution control.
+7. Write exactly one JSON object to:
    {os.path.join(ws, 'runs', 'proposals', f'iter-{it:02d}.json')}
 
 Proposal schemas:
@@ -140,10 +150,13 @@ Harness policy (declarative only):
 Allowed policy keys: inference_max_turns, maintainer_max_turns,
 proposer_max_turns, maintainer_run_budget, proposer_run_budget.
 
-Core contract:
-{{"target": "core", "action": "patch", "name": "runtime", "manifest": {{"adapter": "none"}}}}
-Core adapter mutation is unsupported in V0.2 and will be recorded as invalid
-without running a validation rollout.
+Core source patch (registered source only):
+{{"target": "core", "action": "patch", "source_id": "demo-core", "base_sha": "CURRENT_ACCEPTED_SHA", "edits": [{{"file": "src/value.txt", "op": "replace", "target": "old", "content": "new"}}]}}
+Allowed core edit operations are append, replace, and insert_after. The source_id
+and base_sha must match the trusted registry summary above. The proposer cannot
+change repository identity, source policy, shell commands, gate definitions, or
+credentials. It also cannot choose a runtime binding_profile or any runtime
+execution setting; those are trusted operator-controlled state.
 
 No action:
 {{"action": "no_action"}}
@@ -155,7 +168,8 @@ skills/prompts concise. Harness changes must use only allowed typed policy keys.
 
 def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
                        accepted: bool, diff: str, baseline_r: float | None,
-                       status: str | None = None, error: str | None = None) -> str:
+                       status: str | None = None, error: str | None = None,
+                       engineering: dict | None = None) -> str:
     prop_path = os.path.join(ws, "runs", "proposals", f"iter-{it:02d}.json")
     target = proposal.get("target", "skill") if isinstance(proposal, dict) else "?"
     action = proposal.get("action", "?") if isinstance(proposal, dict) else "?"
@@ -164,6 +178,7 @@ def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
         "accepted": "ACCEPTED",
         "rejected": "REJECTED",
         "invalid": "INVALID",
+        "operational_error": "OPERATIONAL_ERROR",
         "no_action": "NO_ACTION",
     }.get(effective, effective.upper())
     head = (f"### iter-{it:02d} — {label} "
@@ -181,6 +196,9 @@ def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
     ]
     if error:
         body += ["", f"Validation error: {error}"]
+    if engineering is not None:
+        body += ["", "Engineering evidence:", "", "```json",
+                 json.dumps(engineering, indent=2, sort_keys=True), "```"]
     if diff.strip():
         body += ["", "```diff", diff.strip(), "```"]
     body += [
@@ -190,6 +208,12 @@ def gate_outcome_entry(ws: str, it: int, proposal: dict, r_val: float | None,
     ]
     if effective == "invalid":
         body += ["", "Validation: structural validation failed; no held-out rollout performed."]
+    elif effective == "operational_error":
+        body += ["", "Validation: operational failure; accepted source state and R_best were not advanced."]
+    elif effective == "recovery_required":
+        body += ["", "Validation: recovery is required because source and scoring state could not be proven consistent; no acceptance is claimed."]
+    elif effective == "rejected" and r_val is None:
+        body += ["", "Validation: engineering gate rejected the candidate before held-out rollout."]
     elif accepted:
         body += ["", f"Validation: {r_val} > R_best → accepted; candidate asset committed."]
     else:

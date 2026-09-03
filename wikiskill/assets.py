@@ -12,6 +12,8 @@ import os
 import subprocess
 from typing import Any
 
+from . import core_adapter
+
 TARGETS = ("skill", "prompt", "harness", "core")
 
 HARNESS_POLICY_SCHEMA = {
@@ -136,27 +138,33 @@ class GitAssetDriver:
     def initial_message(self) -> str:
         return f"A0: empty {self.target} asset set"
 
-    def prepare(self, ws: str, iteration: int) -> None:
+    def prepare(self, ws: str, iteration: int, proposal: dict | None = None):
         root = self.root(ws)
         _ensure_git_repo(root, self.initial_message())
         _git_commit(root, f"base iter-{iteration}", allow_empty=True)
+        return None
 
     def validate(self, ws: str, proposal: dict) -> None:
         raise NotImplementedError
 
-    def apply(self, ws: str, proposal: dict) -> str:
+    def apply(self, ws: str, proposal: dict, context=None) -> str:
         raise NotImplementedError
 
-    def diff(self, ws: str) -> str:
+    def diff(self, ws: str, context=None) -> str:
         return _working_diff(self.root(ws))
 
-    def accept(self, ws: str, iteration: int, score: float) -> None:
-        _git_commit(self.root(ws), f"accept iter-{iteration} R={score}", allow_empty=True)
+    def pre_gates(self, ws: str, proposal: dict, context=None) -> list[dict]:
+        return []
 
-    def rollback(self, ws: str) -> None:
+    def accept(self, ws: str, iteration: int, score: float, context=None):
+        _git_commit(self.root(ws), f"accept iter-{iteration} R={score}", allow_empty=True)
+        return None
+
+    def rollback(self, ws: str, context=None):
         root = self.root(ws)
         _git(root, "reset", "--hard", "-q")
         _git(root, "clean", "-fd", "-q")
+        return None
 
 
 class SkillDriver(GitAssetDriver):
@@ -188,7 +196,7 @@ class SkillDriver(GitAssetDriver):
             _apply_text_edits(open(path, encoding="utf-8").read(), proposal.get("edits"),
                               label=name)
 
-    def apply(self, ws: str, proposal: dict) -> str:
+    def apply(self, ws: str, proposal: dict, context=None) -> str:
         self.validate(ws, proposal)
         action = proposal["action"]
         name = proposal["name"]
@@ -234,7 +242,7 @@ class PromptDriver(GitAssetDriver):
             _apply_text_edits(open(path, encoding="utf-8").read(), proposal.get("edits"),
                               label="inference prompt")
 
-    def apply(self, ws: str, proposal: dict) -> str:
+    def apply(self, ws: str, proposal: dict, context=None) -> str:
         self.validate(ws, proposal)
         path = prompt_overlay_path(ws)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -277,7 +285,7 @@ class HarnessDriver(GitAssetDriver):
     def validate(self, ws: str, proposal: dict) -> None:
         self._resulting_policy(ws, proposal)
 
-    def apply(self, ws: str, proposal: dict) -> str:
+    def apply(self, ws: str, proposal: dict, context=None) -> str:
         policy = self._resulting_policy(ws, proposal)
         path = harness_policy_path(ws)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -289,27 +297,63 @@ class HarnessDriver(GitAssetDriver):
 
 class CoreDriver(GitAssetDriver):
     target = "core"
+    candidate_runtime_bound = False
 
     def root(self, ws: str) -> str:
         return os.path.join(ws, "assets", "core", "active")
 
-    def prepare(self, ws: str, iteration: int) -> None:
-        super().prepare(ws, iteration)
-        path = core_manifest_path(ws)
-        if not os.path.exists(path):
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"adapter": "none", "source_root": None,
-                           "build_gate": None, "test_gate": None}, f,
-                          indent=2, sort_keys=True)
-                f.write("\n")
-            _git_commit(self.root(ws), "core manifest: safe adapter none")
-
     def validate(self, ws: str, proposal: dict) -> None:
-        raise ValueError("core adapter mutation is unsupported in V0.2")
+        core_adapter.validate_core_proposal(ws, proposal)
 
-    def apply(self, ws: str, proposal: dict) -> str:
-        self.validate(ws, proposal)
-        raise AssertionError("unreachable")
+    def prepare(self, ws: str, iteration: int, proposal: dict | None = None):
+        if proposal is None:
+            raise ValueError("core prepare requires proposal")
+        return core_adapter.begin_candidate(ws, iteration, proposal)
+
+    def apply(self, ws: str, proposal: dict, context=None) -> str:
+        if context is None:
+            raise ValueError("core apply requires candidate context")
+        return core_adapter.apply_candidate(context)
+
+    def diff(self, ws: str, context=None) -> str:
+        if context is None:
+            raise ValueError("core diff requires candidate context")
+        return core_adapter.candidate_diff(context)
+
+    def pre_gates(self, ws: str, proposal: dict, context=None) -> list[dict]:
+        if context is None:
+            raise ValueError("core pre_gates requires candidate context")
+        return core_adapter.run_pre_gates(context)
+
+    def seal(self, ws: str, iteration: int, context=None):
+        if context is None:
+            raise ValueError("core seal requires candidate context")
+        return core_adapter.seal_candidate(context, iteration)
+
+    def advance_source(self, ws: str, iteration: int, context=None):
+        if context is None:
+            raise ValueError("core source transition requires candidate context")
+        return core_adapter.advance_accepted_candidate(context, iteration)
+
+    def compensate_source(self, ws: str, iteration: int, transition: dict, context=None):
+        if context is None:
+            raise ValueError("core source compensation requires candidate context")
+        return core_adapter.compensate_accepted_candidate(context, transition, iteration)
+
+    def release_candidate_ref(self, ws: str, iteration: int, context=None):
+        if context is None:
+            raise ValueError("core candidate ref release requires candidate context")
+        return core_adapter.release_candidate_ref(context, iteration)
+
+    def accept(self, ws: str, iteration: int, score: float, context=None):
+        if context is None:
+            raise ValueError("core accept requires candidate context")
+        return core_adapter.accept_candidate(context, iteration)
+
+    def rollback(self, ws: str, context=None):
+        if context is None:
+            raise ValueError("core rollback requires candidate context")
+        return core_adapter.reject_candidate(context)
 
 
 _SKILL_DRIVER = SkillDriver()
